@@ -1,0 +1,22 @@
+import { Injectable } from '@nestjs/common';
+import { InjectModel } from '@nestjs/mongoose';
+import { User } from './schemas/user.schema';
+import { Model } from 'mongoose';
+
+@Injectable()
+export class UsersService {
+    constructor(@InjectModel(User.name) private userModel: Model<User>) { }
+
+    createUser(userData: Partial<User>): Promise<User> {
+        const newUser = new this.userModel(userData);
+        return newUser.save();
+    }
+
+    findByPhone(phone: string): Promise<User | null> {
+        return this.userModel.findOne({ phone }).exec();
+    }
+
+    findById(id: string): Promise<User | null> {
+        return this.userModel.findById(id).select('-password').exec();
+    }
+}
