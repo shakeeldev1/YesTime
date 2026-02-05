@@ -15,6 +15,9 @@ export class User extends Document {
     @Prop({ default: false })
     isPhoneVerified: boolean;
 
+    @Prop({ default: null })
+    refreshToken: string | null;
+
     @Prop({ required: true })
     password: string;
 }

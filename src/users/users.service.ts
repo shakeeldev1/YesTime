@@ -19,4 +19,8 @@ export class UsersService {
     findById(id: string): Promise<User | null> {
         return this.userModel.findById(id).select('-password').exec();
     }
+
+    async updateRefreshToken(userId: string, data: { refreshToken: string | null }): Promise<User | null> {
+        return this.userModel.findByIdAndUpdate(userId, { refreshToken: data.refreshToken }, { new: true }).exec();
+    }
 }
