@@ -5,9 +5,10 @@ import { AuthModule } from './auth/auth.module';
 import { MongooseModule } from '@nestjs/mongoose';
 import { UsersModule } from './users/users.module';
 import { ProfileModule } from './profile/profile.module';
+import { WalletModule } from './wallet/wallet.module';
 
 @Module({
-  imports: [MongooseModule.forRoot('mongodb://localhost/yes-time'), AuthModule, UsersModule, ProfileModule],
+  imports: [MongooseModule.forRoot('mongodb://localhost/yes-time'), AuthModule, UsersModule, ProfileModule, WalletModule],
   controllers: [AppController],
   providers: [AppService],
 })
