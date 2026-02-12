@@ -6,9 +6,12 @@ import { MongooseModule } from '@nestjs/mongoose';
 import { UsersModule } from './users/users.module';
 import { ProfileModule } from './profile/profile.module';
 import { WalletModule } from './wallet/wallet.module';
+import { CarParticipationModule } from './car-participation/car-participation.module';
+import { CarContributionsModule } from './car-contributions/car-contributions.module';
+import { CarWinnerModule } from './car-winner/car-winner.module';
 
 @Module({
-  imports: [MongooseModule.forRoot('mongodb://localhost/yes-time'), AuthModule, UsersModule, ProfileModule, WalletModule],
+  imports: [MongooseModule.forRoot('mongodb://localhost/yes-time'), AuthModule, UsersModule, ProfileModule, WalletModule, CarParticipationModule, CarContributionsModule, CarWinnerModule],
   controllers: [AppController],
   providers: [AppService],
 })
