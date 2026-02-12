@@ -3,14 +3,14 @@ import { Types } from "mongoose";
 
 @Schema({timestamps:true})
 export class CarContribution {
-    @Prop({required:true,type:Types.ObjectId,ref:'CarParticipation'})
-    carParticipationId: Types.ObjectId
+    @Prop({ required: true, type: Types.ObjectId, ref: 'CarParticipation' })
+    carParticipationId!: Types.ObjectId;
 
     @Prop({required:true,type:Types.ObjectId,ref:'User'})
-    userId: Types.ObjectId
+    userId!: Types.ObjectId;
 
     @Prop({required:true})
-    amount:number
+    amount!: number;
 
     @Prop()
     date: Date = new Date();
