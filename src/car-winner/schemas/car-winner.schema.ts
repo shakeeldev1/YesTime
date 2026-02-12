@@ -3,8 +3,9 @@ import { Types } from "mongoose";
 
 @Schema({timestamps:true})
 export class CarWinner {
+    
     @Prop({required:true})
-    coupenNumber!: string;
+    winningCoupen!: string;
 
     @Prop()
     winningDate: Date = new Date();
