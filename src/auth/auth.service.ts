@@ -12,11 +12,23 @@ export class AuthService {
         const exists = await this.userService.findByPhone(dto.phone);
         if (exists) throw new BadRequestException('User with this phone number already exists');
         const hashedPassword = await bcrypt.hash(dto.password, 10);
+        const otp = await this.generateOtp();
         const user = await this.userService.createUser({
             ...dto,
-            password: hashedPassword
+            password: hashedPassword,
+            otp: otp
         })
-        return this.signToken(user._id.toString());
+        return { message: 'User registered successfully', userId: user._id, otp: otp };
+    }
+
+    async verifyOtp(phone: string, otp: string) {
+        const user = await this.userService.findByPhone(phone);
+        if (!user) throw new BadRequestException('User not found');
+        if (user.otp !== otp) throw new BadRequestException('Invalid OTP');
+        await user.updateOne({ isPhoneVerified: true, otp: null });
+        const tokens = await this.signToken(user._id.toString());
+        await this.saveRefreshToken(user._id.toString(), tokens.refreshToken);
+        return { message: 'Phone number verified successfully', tokens };
     }
 
     async login(phone: string, password: string) {
@@ -31,7 +43,9 @@ export class AuthService {
     }
 
     async logout(userId: string) {
-        await this.userService.updateRefreshToken(userId, { refreshToken: null });
+        const user = await this.userService.findById(userId);
+        if (!user) throw new BadRequestException('User not found');
+        await user.updateOne({ refreshToken: null });
         return { message: 'Logged out successfully' };
     }
 
@@ -77,5 +91,9 @@ export class AuthService {
     private async saveRefreshToken(userId: string, refreshToken: string) {
         const hashedToken = await bcrypt.hash(refreshToken, 10);
         await this.userService.updateRefreshToken(userId, { refreshToken: hashedToken });
+    }
+
+    private async generateOtp() {
+        return Math.floor(100000 + Math.random() * 900000).toString();
     }
 }
