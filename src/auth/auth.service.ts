@@ -28,7 +28,19 @@ export class AuthService {
         await user.updateOne({ isPhoneVerified: true, otp: null });
         const tokens = await this.signToken(user._id.toString());
         await this.saveRefreshToken(user._id.toString(), tokens.refreshToken);
-        return { message: 'Phone number verified successfully', tokens };
+        
+        // Return tokens along with user data
+        return { 
+            message: 'Phone number verified successfully', 
+            ...tokens,
+            user: {
+                id: user._id,
+                name: user.name,
+                email: user.email,
+                phone: user.phone,
+                isPhoneVerified: true
+            }
+        };
     }
 
     async login(phone: string, password: string) {
@@ -39,7 +51,18 @@ export class AuthService {
 
         const tokens = await this.signToken(user._id.toString());
         await this.saveRefreshToken(user._id.toString(), tokens.refreshToken);
-        return tokens;
+        
+        // Return tokens along with user data
+        return {
+            ...tokens,
+            user: {
+                id: user._id,
+                name: user.name,
+                email: user.email,
+                phone: user.phone,
+                isPhoneVerified: user.isPhoneVerified
+            }
+        };
     }
 
     async logout(userId: string) {
