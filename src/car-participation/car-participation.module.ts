@@ -9,6 +9,7 @@ import { CarParticipation, CarParticipationSchema } from './schemas/car-particip
     { name: CarParticipation.name, schema: CarParticipationSchema }
   ])],
   controllers: [CarParticipationController],
-  providers: [CarParticipationService]
+  providers: [CarParticipationService],
+  exports: [MongooseModule]
 })
 export class CarParticipationModule { }
