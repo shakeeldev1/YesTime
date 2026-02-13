@@ -12,4 +12,12 @@ export class SignupDto{
 
     @IsString()
     password:string;
+
+    @IsOptional()
+    @IsString()
+    cnicFrontImage?: string;
+
+    @IsOptional()
+    @IsString()
+    cnicBackImage?: string;
 }

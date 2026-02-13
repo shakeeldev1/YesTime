@@ -1,4 +1,5 @@
-import { Body, Controller, Post, UseGuards, Request } from '@nestjs/common';
+import { Body, Controller, Post, UseGuards, Request, UseInterceptors, UploadedFiles } from '@nestjs/common';
+import { FileFieldsInterceptor } from '@nestjs/platform-express';
 import { AuthService } from './auth.service';
 import { SignupDto } from './dto/signup.dto';
 import { loginDto } from './dto/login.dto';
@@ -10,8 +11,15 @@ export class AuthController {
     constructor(private authService: AuthService) {}
 
     @Post('signup')
-    signup(@Body() dto:SignupDto) {
-        return this.authService.signup(dto);
+    @UseInterceptors(FileFieldsInterceptor([
+        { name: 'cnicFront', maxCount: 1 },
+        { name: 'cnicBack', maxCount: 1 }
+    ]))
+    async signup(
+        @Body() dto: SignupDto,
+        @UploadedFiles() files: { cnicFront?: Express.Multer.File[], cnicBack?: Express.Multer.File[] }
+    ) {
+        return this.authService.signup(dto, files);
     }
 
     @Post('verify-otp')

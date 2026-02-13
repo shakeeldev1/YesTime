@@ -3,21 +3,48 @@ import { UsersService } from 'src/users/users.service';
 import { SignupDto } from './dto/signup.dto';
 import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcryptjs';
+import { CloudinaryService } from 'src/cloudinary/cloudinary.service';
 
 @Injectable()
 export class AuthService {
-    constructor(private userService: UsersService, private jwtService: JwtService) { }
+    constructor(
+        private userService: UsersService, 
+        private jwtService: JwtService,
+        private cloudinaryService: CloudinaryService
+    ) { }
 
-    async signup(dto: SignupDto) {
+    async signup(
+        dto: SignupDto, 
+        files?: { cnicFront?: Express.Multer.File[], cnicBack?: Express.Multer.File[] }
+    ) {
         const exists = await this.userService.findByPhone(dto.phone);
         if (exists) throw new BadRequestException('User with this phone number already exists');
+        
         const hashedPassword = await bcrypt.hash(dto.password, 10);
         const otp = await this.generateOtp();
+        
+        // Upload CNIC images to Cloudinary if provided
+        let cnicFrontUrl: string | undefined;
+        let cnicBackUrl: string | undefined;
+        
+        if (files?.cnicFront?.[0]) {
+            const cnicFrontResult = await this.cloudinaryService.uploadImage(files.cnicFront[0]);
+            cnicFrontUrl = cnicFrontResult.secure_url;
+        }
+        
+        if (files?.cnicBack?.[0]) {
+            const cnicBackResult = await this.cloudinaryService.uploadImage(files.cnicBack[0]);
+            cnicBackUrl = cnicBackResult.secure_url;
+        }
+        
         const user = await this.userService.createUser({
             ...dto,
             password: hashedPassword,
-            otp: otp
-        })
+            otp: otp,
+            cnicFrontImage: cnicFrontUrl,
+            cnicBackImage: cnicBackUrl
+        });
+        
         return { message: 'User registered successfully', userId: user._id, otp: otp };
     }
 
