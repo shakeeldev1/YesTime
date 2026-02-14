@@ -17,4 +17,9 @@ export class CarContributionsController {
     async getMyContributions(@Request() req) {
         return this.carContributionsService.getMyContributions(req.user.userId);
     }
+
+    @Get("stats")
+    async getMyStats(@Request() req) {
+        return this.carContributionsService.getContributionStats(req.user.userId);
+    }
 }
