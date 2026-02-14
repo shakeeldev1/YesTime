@@ -23,4 +23,12 @@ export class UsersService {
     async updateRefreshToken(userId: string, data: { refreshToken: string | null }): Promise<User | null> {
         return this.userModel.findByIdAndUpdate(userId, { refreshToken: data.refreshToken }, { new: true }).exec();
     }
+
+    async updateProfile(userId: string, updateData: Partial<User>): Promise<User | null> {
+        return this.userModel.findByIdAndUpdate(
+            userId, 
+            { $set: updateData }, 
+            { new: true }
+        ).select('-password').exec();
+    }
 }

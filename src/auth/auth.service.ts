@@ -28,12 +28,12 @@ export class AuthService {
         let cnicBackUrl: string | undefined;
         
         if (files?.cnicFront?.[0]) {
-            const cnicFrontResult = await this.cloudinaryService.uploadImage(files.cnicFront[0]);
+            const cnicFrontResult = await this.cloudinaryService.uploadImage(files.cnicFront[0], 'yes-time/cnic');
             cnicFrontUrl = cnicFrontResult.secure_url;
         }
         
         if (files?.cnicBack?.[0]) {
-            const cnicBackResult = await this.cloudinaryService.uploadImage(files.cnicBack[0]);
+            const cnicBackResult = await this.cloudinaryService.uploadImage(files.cnicBack[0], 'yes-time/cnic');
             cnicBackUrl = cnicBackResult.secure_url;
         }
         

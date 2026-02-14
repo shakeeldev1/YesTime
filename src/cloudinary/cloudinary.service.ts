@@ -3,11 +3,11 @@ import { v2 as cloudinary, UploadApiResponse, UploadApiErrorResponse } from 'clo
 
 @Injectable()
 export class CloudinaryService {
-    async uploadImage(file: Express.Multer.File): Promise<UploadApiResponse> {
+    async uploadImage(file: Express.Multer.File, folder: string = 'yes-time/general'): Promise<UploadApiResponse> {
         return new Promise((resolve, reject) => {
             const uploadStream = cloudinary.uploader.upload_stream(
                 {
-                    folder: 'yes-time/cnic',
+                    folder: folder,
                     resource_type: 'auto',
                 },
                 (error, result) => {

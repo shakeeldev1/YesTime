@@ -30,6 +30,9 @@ export class User extends Document {
 
   @Prop()
   cnicBackImage?: string;
+
+  @Prop()
+  profileImage?: string;
 }
 
 export const UserSchema = SchemaFactory.createForClass(User);
