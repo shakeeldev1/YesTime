@@ -441,16 +441,29 @@ export class GameService {
       $or: [{ status: 'active' }, { isPermanent: true, status: 'completed' }],
     });
 
-    // Next draw is at 10:00 PM today or tomorrow
     const now = new Date();
-    const nextDraw = new Date(now);
-    nextDraw.setHours(22, 0, 0, 0);
-    if (now >= nextDraw) {
-      nextDraw.setDate(nextDraw.getDate() + 1);
+    let nextDrawTime: Date;
+    let drawNumber: number;
+
+    if (!lastDraw) {
+      // No draws yet — align to the next whole minute boundary
+      nextDrawTime = new Date(now);
+      nextDrawTime.setSeconds(0, 0);
+      nextDrawTime.setMinutes(now.getMinutes() + 1);
+      drawNumber = 1;
+    } else {
+      // Next draw is exactly 60 seconds after the last draw
+      nextDrawTime = new Date(lastDraw.drawDate.getTime() + 60000);
+      drawNumber = lastDraw.drawNumber + 1;
     }
 
+    const countdown = Math.max(0, Math.floor((nextDrawTime.getTime() - now.getTime()) / 1000));
+
     return {
-      nextDrawTime: nextDraw,
+      serverTime: now,
+      nextDrawTime,
+      countdown,
+      drawNumber,
       totalParticipants,
       lastDraw: lastDraw
         ? {

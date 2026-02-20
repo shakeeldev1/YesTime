@@ -8,10 +8,10 @@ export class GameDrawScheduler {
 
   constructor(private readonly gameService: GameService) {}
 
-  // Run lucky draw every day at 10:00 PM
-  @Cron('0 22 * * *')
+  // Run lucky draw every minute
+  @Cron(CronExpression.EVERY_MINUTE)
   async handleDailyDraw() {
-    this.logger.log('🎰 Executing daily lucky draw...');
+    this.logger.log('🎰 Executing lucky draw...');
     try {
       const result = await this.gameService.executeLuckyDraw();
       if (result.draw) {
