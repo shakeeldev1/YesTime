@@ -13,6 +13,7 @@ import { Transaction, TransactionSchema } from './schemas/transaction.schema';
     ])
   ],
   controllers: [WalletController],
-  providers: [WalletService]
+  providers: [WalletService],
+  exports: [WalletService]
 })
 export class WalletModule {}

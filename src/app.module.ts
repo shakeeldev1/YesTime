@@ -10,6 +10,7 @@ import { WalletModule } from './wallet/wallet.module';
 import { CarParticipationModule } from './car-participation/car-participation.module';
 import { CarContributionsModule } from './car-contributions/car-contributions.module';
 import { CarWinnerModule } from './car-winner/car-winner.module';
+import { GameModule } from './game/game.module';
 
 @Module({
   imports: [
@@ -21,7 +22,8 @@ import { CarWinnerModule } from './car-winner/car-winner.module';
     WalletModule, 
     CarParticipationModule, 
     CarContributionsModule, 
-    CarWinnerModule
+    CarWinnerModule,
+    GameModule
   ],
   controllers: [AppController],
   providers: [AppService],
