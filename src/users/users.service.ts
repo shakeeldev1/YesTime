@@ -20,6 +20,14 @@ export class UsersService {
         return this.userModel.findById(id).select('-password').exec();
     }
 
+    findByIdWithPassword(id: string): Promise<User | null> {
+        return this.userModel.findById(id).exec();
+    }
+
+    async updatePassword(userId: string, hashedPassword: string): Promise<User | null> {
+        return this.userModel.findByIdAndUpdate(userId, { password: hashedPassword }, { new: true }).select('-password').exec();
+    }
+
     async updateRefreshToken(userId: string, data: { refreshToken: string | null }): Promise<User | null> {
         return this.userModel.findByIdAndUpdate(userId, { refreshToken: data.refreshToken }, { new: true }).exec();
     }

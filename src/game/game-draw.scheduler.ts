@@ -16,7 +16,7 @@ export class GameDrawScheduler {
       const result = await this.gameService.executeLuckyDraw();
       if (result.draw) {
         this.logger.log(
-          `Draw #${result.draw.drawNumber} complete. Winner: ${result.draw.hasWinner ? result.draw.winnerCoupon : 'None'}. Prize: ₹${result.draw.prizeAmount}`,
+          `Draw #${result.draw.drawNumber} complete. Winner: ${result.draw.hasWinner ? result.draw.winnerCoupon : 'None'}. Prize: PKR ${result.draw.prizeAmount}`,
         );
       } else {
         this.logger.log('No participants for the draw');

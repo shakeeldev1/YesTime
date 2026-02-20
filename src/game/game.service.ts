@@ -49,7 +49,7 @@ export class GameService {
     // Check wallet balance
     const balance = await this.walletService.getBalance(userId);
     if (balance < this.DAILY_AMOUNT) {
-      throw new BadRequestException('Insufficient wallet balance. You need at least ₹25');
+      throw new BadRequestException('Insufficient wallet balance. You need at least PKR 25');
     }
 
     // Debit wallet
@@ -88,7 +88,7 @@ export class GameService {
     await payment.save();
 
     // Create notification
-    await this.createNotification(userId, 'Game Joined!', `You joined the Risk-Free Game! Coupon: ${coupon}. ₹${this.DAILY_AMOUNT} deducted from wallet.`, 'GAME');
+    await this.createNotification(userId, 'Game Joined!', `You joined the Risk-Free Game! Coupon: ${coupon}. PKR ${this.DAILY_AMOUNT} deducted from wallet.`, 'GAME');
 
     return {
       message: 'Successfully joined the game!',
@@ -132,7 +132,7 @@ export class GameService {
     // Check wallet balance
     const balance = await this.walletService.getBalance(userId);
     if (balance < this.DAILY_AMOUNT) {
-      throw new BadRequestException('Insufficient wallet balance. You need at least ₹25');
+      throw new BadRequestException('Insufficient wallet balance. You need at least PKR 25');
     }
 
     // Debit wallet
@@ -161,7 +161,7 @@ export class GameService {
     await this.createNotification(
       userId,
       `Day ${cycle.currentDay} Payment`,
-      `₹${this.DAILY_AMOUNT} added. Total savings: ₹${cycle.totalSavings}. Prize today: ₹${this.getPrizeForDay(cycle.currentDay)}`,
+      `PKR ${this.DAILY_AMOUNT} added. Total savings: PKR ${cycle.totalSavings}. Prize today: PKR ${this.getPrizeForDay(cycle.currentDay)}`,
       'SAVINGS',
     );
 
@@ -331,7 +331,7 @@ export class GameService {
       await this.createNotification(
         winner.userId,
         '🎉 YOU WON!',
-        `Congratulations! Your coupon ${winner.couponNumber} won ₹${prizeAmount} in Lucky Draw #${drawNumber}!`,
+        `Congratulations! Your coupon ${winner.couponNumber} won PKR ${prizeAmount} in Lucky Draw #${drawNumber}!`,
         'WIN',
       );
     }
@@ -403,7 +403,7 @@ export class GameService {
       await this.createNotification(
         cycle.userId,
         '🎊 30-Day Cycle Complete!',
-        `Your savings of ₹${cycle.totalSavings} have been credited to your wallet. Your coupon ${cycle.couponNumber} is now permanently in the draw for ₹30,000!`,
+        `Your savings of PKR ${cycle.totalSavings} have been credited to your wallet. Your coupon ${cycle.couponNumber} is now permanently in the draw for PKR 30,000!`,
         'SAVINGS',
       );
     }

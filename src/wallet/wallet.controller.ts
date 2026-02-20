@@ -23,10 +23,10 @@ export class WalletController {
             throw new BadRequestException('Amount must be greater than 0');
         }
         if (amount > 100000) {
-            throw new BadRequestException('Maximum top-up amount is ₹1,00,000');
+            throw new BadRequestException('Maximum top-up amount is PKR 1,00,000');
         }
         const wallet = await this.walletService.credit(req.user.userId, amount);
-        return { message: `₹${amount} added to wallet successfully`, balance: wallet.balance };
+        return { message: `PKR ${amount} added to wallet successfully`, balance: wallet.balance };
     }
 
     // Get transactions for logged-in user

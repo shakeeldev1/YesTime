@@ -38,6 +38,12 @@ export class AuthController {
         return this.authService.logout(req.user.userId);
     }
 
+    @UseGuards(JwtAuthGuard)
+    @Post('change-password')
+    changePassword(@Request() req, @Body() dto: { currentPassword: string; newPassword: string }) {
+        return this.authService.changePassword(req.user.userId, dto.currentPassword, dto.newPassword);
+    }
+
     @Post('refresh')
     refreshToken(@Body() dto: refreshTokenDto) {
         return this.authService.refreshToken(dto.refreshToken);

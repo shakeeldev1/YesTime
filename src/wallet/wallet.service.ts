@@ -14,13 +14,13 @@ export class WalletService {
 
     async credit(userId: string, amount: number): Promise<Wallet> {
         const wallet = await this.walletModel.findOne({ userId });
+        const transaction = new this.transactionModel({ userId, amount, type: 'credit' });
+        await transaction.save();
         if (!wallet) {
             const newWallet = new this.walletModel({ userId, balance: amount });
             return await newWallet.save();
         } else {
             wallet.balance += amount;
-            const transaction = new this.transactionModel({ userId, amount, type: 'credit' });
-            await transaction.save();
             return await wallet.save();
         }
     }
