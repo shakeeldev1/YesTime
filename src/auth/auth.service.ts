@@ -53,7 +53,7 @@ export class AuthService {
         if (!user) throw new BadRequestException('User not found');
         if (user.otp !== otp) throw new BadRequestException('Invalid OTP');
         await user.updateOne({ isPhoneVerified: true, otp: null });
-        const tokens = await this.signToken(user._id.toString());
+        const tokens = await this.signToken(user._id.toString(), user.role || 'user');
         await this.saveRefreshToken(user._id.toString(), tokens.refreshToken);
         
         // Return tokens along with user data
@@ -65,7 +65,8 @@ export class AuthService {
                 name: user.name,
                 email: user.email,
                 phone: user.phone,
-                isPhoneVerified: true
+                isPhoneVerified: true,
+                role: user.role || 'user'
             }
         };
     }
@@ -76,7 +77,7 @@ export class AuthService {
         const passwordMatches = await bcrypt.compare(password, user.password);
         if (!passwordMatches) throw new BadRequestException('Invalid phone number or password');
 
-        const tokens = await this.signToken(user._id.toString());
+        const tokens = await this.signToken(user._id.toString(), user.role || 'user');
         await this.saveRefreshToken(user._id.toString(), tokens.refreshToken);
         
         // Return tokens along with user data
@@ -87,7 +88,8 @@ export class AuthService {
                 name: user.name,
                 email: user.email,
                 phone: user.phone,
-                isPhoneVerified: user.isPhoneVerified
+                isPhoneVerified: user.isPhoneVerified,
+                role: user.role || 'user'
             }
         };
     }
@@ -131,13 +133,13 @@ export class AuthService {
         const tokenMatches = await bcrypt.compare(refreshToken, user.refreshToken);
         if (!tokenMatches) throw new BadRequestException('Invalid refresh token');
 
-        const tokens = await this.signToken(user._id.toString());
+        const tokens = await this.signToken(user._id.toString(), user.role || 'user');
         await this.saveRefreshToken(user._id.toString(), tokens.refreshToken);
         return tokens;
     }
 
-    async signToken(userId: string) {
-        const payload = { sub: userId };
+    async signToken(userId: string, role: string = 'user') {
+        const payload = { sub: userId, role };
         const access_token = await this.jwtService.signAsync(payload, {
             secret: process.env.JWT_ACCESS_SECRET,
             expiresIn: '15m',

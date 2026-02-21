@@ -11,6 +11,7 @@ import { CarParticipationModule } from './car-participation/car-participation.mo
 import { CarContributionsModule } from './car-contributions/car-contributions.module';
 import { CarWinnerModule } from './car-winner/car-winner.module';
 import { GameModule } from './game/game.module';
+import { CashbackModule } from './cashback/cashback.module';
 
 @Module({
   imports: [
@@ -23,7 +24,8 @@ import { GameModule } from './game/game.module';
     CarParticipationModule, 
     CarContributionsModule, 
     CarWinnerModule,
-    GameModule
+    GameModule,
+    CashbackModule
   ],
   controllers: [AppController],
   providers: [AppService],

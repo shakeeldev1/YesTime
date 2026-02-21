@@ -24,6 +24,28 @@ export class UsersService {
         return this.userModel.findById(id).exec();
     }
 
+    async findAll(query?: { role?: string; search?: string; limit?: number }): Promise<User[]> {
+        const filter: any = {};
+        if (query?.role) filter.role = query.role;
+        if (query?.search) {
+            filter.$or = [
+                { name: { $regex: query.search, $options: 'i' } },
+                { phone: { $regex: query.search, $options: 'i' } },
+                { email: { $regex: query.search, $options: 'i' } },
+            ];
+        }
+        return this.userModel
+            .find(filter)
+            .select('-password -refreshToken -otp')
+            .sort({ createdAt: -1 })
+            .limit(query?.limit || 200)
+            .exec();
+    }
+
+    async updateRole(userId: string, role: string): Promise<User | null> {
+        return this.userModel.findByIdAndUpdate(userId, { role }, { new: true }).select('-password').exec();
+    }
+
     async updatePassword(userId: string, hashedPassword: string): Promise<User | null> {
         return this.userModel.findByIdAndUpdate(userId, { password: hashedPassword }, { new: true }).select('-password').exec();
     }
@@ -38,5 +60,14 @@ export class UsersService {
             { $set: updateData }, 
             { new: true }
         ).select('-password').exec();
+    }
+
+    async countByRole(): Promise<{ total: number; users: number; shopkeepers: number; admins: number }> {
+        const [total, shopkeepers, admins] = await Promise.all([
+            this.userModel.countDocuments(),
+            this.userModel.countDocuments({ role: 'shopkeeper' }),
+            this.userModel.countDocuments({ role: 'admin' }),
+        ]);
+        return { total, users: total - shopkeepers - admins, shopkeepers, admins };
     }
 }

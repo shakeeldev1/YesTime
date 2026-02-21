@@ -353,17 +353,17 @@ export class GameService {
     });
     await draw.save();
 
-    // Notify all participants about draw result
-    for (const cycle of activeCycles) {
-      if (cycle.userId !== winnerUserId) {
-        await this.createNotification(
-          cycle.userId,
-          `Draw #${drawNumber} Result`,
-          winner
-            ? `Winning number: ${winningNumber}. Winner: ${winnerCoupon}. Your savings are safe!`
-            : `Winning number: ${winningNumber}. No winner this round. Your savings are safe!`,
-          'GAME',
-        );
+    // Only notify participants when someone actually wins
+    if (winner) {
+      for (const cycle of activeCycles) {
+        if (cycle.userId !== winnerUserId) {
+          await this.createNotification(
+            cycle.userId,
+            `Draw #${drawNumber} Result`,
+            `Winning number: ${winningNumber}. Winner: ${winnerCoupon}. Your savings are safe!`,
+            'GAME',
+          );
+        }
       }
     }
 
