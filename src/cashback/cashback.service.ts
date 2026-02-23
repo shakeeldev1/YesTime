@@ -56,10 +56,21 @@ export class CashbackService {
     return { level, committed, remaining: totalShopping - committed };
   }
 
+  private async ensureRegistrationFeeBalance(userId: string) {
+    const balance = await this.walletService.getBalance(userId);
+    if (balance < this.REGISTRATION_FEE) {
+      throw new BadRequestException(
+        `Insufficient wallet balance. You need PKR ${this.REGISTRATION_FEE} to submit shopkeeper request. Current balance: PKR ${balance}`,
+      );
+    }
+  }
+
   // ========== SHOPKEEPER MANAGEMENT ==========
 
   /** User submits request to become shopkeeper (pending admin approval) */
   async requestShopkeeper(userId: string, dto: RegisterShopkeeperDto) {
+    await this.ensureRegistrationFeeBalance(userId);
+
     const existing = await this.shopkeeperModel.findOne({ userId: new Types.ObjectId(userId) });
     if (existing) {
       if (existing.status === 'rejected') {
