@@ -17,8 +17,18 @@ export class AuthService {
         dto: SignupDto, 
         files?: { cnicFront?: Express.Multer.File[], cnicBack?: Express.Multer.File[] }
     ) {
-        const exists = await this.userService.findByPhone(dto.phone);
-        if (exists) throw new BadRequestException('User with this phone number already exists');
+        const [existingPhoneUser, existingEmailUser] = await Promise.all([
+            this.userService.findByPhone(dto.phone),
+            this.userService.findByEmail(dto.email),
+        ]);
+
+        if (existingPhoneUser) {
+            throw new BadRequestException('User with this phone number already exists');
+        }
+
+        if (existingEmailUser) {
+            throw new BadRequestException('User with this email already exists');
+        }
         
         const hashedPassword = await bcrypt.hash(dto.password, 10);
         const otp = await this.generateOtp();
@@ -37,13 +47,28 @@ export class AuthService {
             cnicBackUrl = cnicBackResult.secure_url;
         }
         
-        const user = await this.userService.createUser({
-            ...dto,
-            password: hashedPassword,
-            otp: otp,
-            cnicFrontImage: cnicFrontUrl,
-            cnicBackImage: cnicBackUrl
-        });
+        let user;
+        try {
+            user = await this.userService.createUser({
+                ...dto,
+                password: hashedPassword,
+                otp: otp,
+                cnicFrontImage: cnicFrontUrl,
+                cnicBackImage: cnicBackUrl
+            });
+        } catch (error: any) {
+            if (error?.code === 11000) {
+                const duplicateField = Object.keys(error?.keyPattern || {})[0];
+                if (duplicateField === 'email') {
+                    throw new BadRequestException('User with this email already exists');
+                }
+                if (duplicateField === 'phone') {
+                    throw new BadRequestException('User with this phone number already exists');
+                }
+                throw new BadRequestException('User already exists with provided details');
+            }
+            throw error;
+        }
         
         return { message: 'User registered successfully', userId: user._id, otp: otp };
     }

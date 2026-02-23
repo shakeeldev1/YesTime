@@ -16,6 +16,10 @@ export class UsersService {
         return this.userModel.findOne({ phone }).exec();
     }
 
+    findByEmail(email: string): Promise<User | null> {
+        return this.userModel.findOne({ email }).exec();
+    }
+
     findById(id: string): Promise<User | null> {
         return this.userModel.findById(id).select('-password').exec();
     }
