@@ -3,12 +3,16 @@ import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { CarParticipation, ParticipationPhase, ParticipationStatus } from 'src/car-participation/schemas/car-participation.schema';
 import { CarWinner } from './schemas/car-winner.schema';
+import { User } from 'src/users/schemas/user.schema';
+import { MailerService } from 'src/mailer/mailer.service';
 
 @Injectable()
 export class CarWinnerService {
     constructor(
         @InjectModel(CarParticipation.name) private carParticipationModel: Model<CarParticipation>,
-        @InjectModel(CarWinner.name) private carWinnerModel: Model<CarWinner>
+        @InjectModel(CarWinner.name) private carWinnerModel: Model<CarWinner>,
+        @InjectModel(User.name) private userModel: Model<User>,
+        private mailerService: MailerService
     ) { }
 
     private generateRandom6DigitCoupon() {
@@ -16,7 +20,6 @@ export class CarWinnerService {
     }
 
     async spinAndSelectWinner() {
-        // Get all active participations that haven't won yet
         const eligibleParticipations = await this.carParticipationModel.find({
             status: ParticipationStatus.ACTIVE,
             phase: ParticipationPhase.PRE_WIN,
@@ -30,7 +33,6 @@ export class CarWinnerService {
             return { message: 'No eligible participants for this draw', winner: null };
         }
 
-        // Random 6-digit winning token; winner exists only if a participant has this coupon
         const winningCoupon = this.generateRandom6DigitCoupon();
         const winner = eligibleParticipations.find((participant) => participant.coupenNumber === winningCoupon);
 
@@ -45,7 +47,6 @@ export class CarWinnerService {
         const previousWinnersCount = await this.carWinnerModel.countDocuments();
         const drawNumber = previousWinnersCount + 1;
 
-        // Update participation
         winner.hasWon = true;
         winner.carAwarded = true;
         winner.winDate = drawDate;
@@ -53,7 +54,6 @@ export class CarWinnerService {
         winner.phase = ParticipationPhase.POST_WIN;
         await winner.save();
 
-        // Create winner record
         const carWinner = new this.carWinnerModel({
             carParticipationId: winner._id,
             userId: winner.userId,
@@ -62,6 +62,12 @@ export class CarWinnerService {
             winningDate: drawDate
         });
         await carWinner.save();
+
+        // Send car award email to winner
+        const winnerUser = await this.userModel.findById(winner.userId);
+        if (winnerUser) {
+            await this.mailerService.sendCarAwardEmail(winnerUser.email, winnerUser.name, 'lottery');
+        }
 
         return {
             message: 'Winner selected successfully!',

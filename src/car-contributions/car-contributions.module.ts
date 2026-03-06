@@ -6,13 +6,15 @@ import { CarContribution, CarContributionSchema } from './schemas/car-contributi
 import { Wallet, WalletSchema } from 'src/wallet/schemas/wallet.schema';
 import { CarParticipation, CarParticipationSchema } from 'src/car-participation/schemas/car-participation.schema';
 import { CarWinner, CarWinnerSchema } from 'src/car-winner/schemas/car-winner.schema';
+import { User, UserSchema } from 'src/users/schemas/user.schema';
 
 @Module({
   imports: [MongooseModule.forFeature([
     { name: CarContribution.name, schema: CarContributionSchema },
     { name: Wallet.name, schema: WalletSchema },
     { name: CarParticipation.name, schema: CarParticipationSchema },
-    { name: CarWinner.name, schema: CarWinnerSchema }
+    { name: CarWinner.name, schema: CarWinnerSchema },
+    { name: User.name, schema: UserSchema }
   ])],
   controllers: [CarContributionsController],
   providers: [CarContributionsService]

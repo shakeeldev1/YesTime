@@ -9,6 +9,7 @@ import { CashbackNotification } from './schemas/cashback-notification.schema';
 import { WalletService } from '../wallet/wallet.service';
 import { RegisterShopkeeperDto, RecordPurchaseDto } from './dto/cashback.dto';
 import { UsersService } from '../users/users.service';
+import { MailerService } from '../mailer/mailer.service';
 
 @Injectable()
 export class CashbackService {
@@ -25,6 +26,7 @@ export class CashbackService {
     @InjectModel(CashbackNotification.name) private readonly notificationModel: Model<CashbackNotification>,
     private readonly walletService: WalletService,
     private readonly usersService: UsersService,
+    private readonly mailerService: MailerService,
   ) {}
 
   // ========== HELPERS ==========
@@ -178,6 +180,14 @@ export class CashbackService {
       'SYSTEM',
     );
 
+    // Send email notification
+    const user = await this.usersService.findById(userId);
+    if (user) {
+      await this.mailerService.sendShopkeeperApprovalEmail(user.email, user.name, shopkeeper.shopName);
+      // Also update shopkeeperStatus on user
+      await this.usersService.updateProfile(userId, { shopkeeperStatus: 'approved' } as any);
+    }
+
     return { message: 'Shopkeeper approved successfully', shopkeeper };
   }
 
@@ -199,12 +209,35 @@ export class CashbackService {
       'SYSTEM',
     );
 
+    // Send email notification
+    const user = await this.usersService.findById(shopkeeper.userId.toString());
+    if (user) {
+      await this.mailerService.sendShopkeeperRejectionEmail(user.email, user.name, shopkeeper.shopName, reason);
+      await this.usersService.updateProfile(shopkeeper.userId.toString(), { shopkeeperStatus: 'rejected' } as any);
+    }
+
     return { message: 'Shopkeeper rejected', shopkeeper };
   }
 
   /** Get pending shopkeeper requests */
   async getPendingShopkeepers() {
-    return this.shopkeeperModel.find({ status: 'pending' }).populate('userId', 'name email phone').sort({ createdAt: -1 });
+    const shopkeepers = await this.shopkeeperModel
+      .find({ status: 'pending' })
+      .populate('userId', 'name email phone referralCode totalReferralEarnings')
+      .sort({ createdAt: -1 });
+
+    const rows = await Promise.all(
+      shopkeepers.map(async (shopkeeper: any) => {
+        const userId = shopkeeper.userId?._id;
+        const referralCount = userId ? await this.usersService.countReferrals(userId.toString()) : 0;
+        return {
+          ...shopkeeper.toObject(),
+          referralCount,
+        };
+      }),
+    );
+
+    return rows;
   }
 
   /** Get shopkeeper by id */
@@ -226,7 +259,35 @@ export class CashbackService {
   }
 
   async getAllShopkeepers() {
-    return this.shopkeeperModel.find().populate('userId', 'name email phone').sort({ createdAt: -1 });
+    const shopkeepers = await this.shopkeeperModel
+      .find()
+      .populate('userId', 'name email phone referralCode totalReferralEarnings')
+      .sort({ createdAt: -1 });
+
+    const rows = await Promise.all(
+      shopkeepers.map(async (shopkeeper: any) => {
+        const userId = shopkeeper.userId?._id;
+        const referralCount = userId ? await this.usersService.countReferrals(userId.toString()) : 0;
+        return {
+          ...shopkeeper.toObject(),
+          referralCount,
+        };
+      }),
+    );
+
+    return rows;
+  }
+
+  async deleteShopkeeper(shopkeeperId: string) {
+    const shopkeeper = await this.shopkeeperModel.findById(shopkeeperId);
+    if (!shopkeeper) throw new NotFoundException('Shopkeeper not found');
+
+    const userId = shopkeeper.userId.toString();
+    await this.shopkeeperModel.findByIdAndDelete(shopkeeperId);
+    await this.usersService.updateRole(userId, 'user');
+    await this.usersService.updateProfile(userId, { shopkeeperStatus: 'none' } as any);
+
+    return { message: 'Shopkeeper deleted successfully' };
   }
 
   async getShopkeeperStats() {

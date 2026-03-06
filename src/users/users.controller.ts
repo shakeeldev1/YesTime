@@ -1,4 +1,4 @@
-import { Controller, Get, Put, Param, Body, Query, UseGuards, Request, BadRequestException } from '@nestjs/common';
+import { Controller, Get, Put, Delete, Param, Body, Query, UseGuards, Request, BadRequestException } from '@nestjs/common';
 import { UsersService } from './users.service';
 import { JwtAuthGuard } from 'src/auth/guards/jwt-auth.guard';
 import { RolesGuard } from 'src/auth/guards/roles.guard';
@@ -33,5 +33,17 @@ export class UsersController {
         const user = await this.usersService.updateRole(userId, role);
         if (!user) throw new BadRequestException('User not found');
         return { message: `Role updated to ${role}`, user };
+    }
+
+    @UseGuards(JwtAuthGuard, RolesGuard)
+    @Roles('admin')
+    @Delete(':userId')
+    async deleteUser(@Param('userId') userId: string, @Request() req) {
+        if (req.user?.userId === userId) {
+            throw new BadRequestException('You cannot delete your own admin account');
+        }
+        const deleted = await this.usersService.deleteUser(userId);
+        if (!deleted) throw new BadRequestException('User not found');
+        return { message: 'User deleted successfully' };
     }
 }

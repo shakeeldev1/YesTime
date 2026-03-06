@@ -4,13 +4,15 @@ import { SignupDto } from './dto/signup.dto';
 import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcryptjs';
 import { CloudinaryService } from 'src/cloudinary/cloudinary.service';
+import { MailerService } from 'src/mailer/mailer.service';
 
 @Injectable()
 export class AuthService {
     constructor(
         private userService: UsersService, 
         private jwtService: JwtService,
-        private cloudinaryService: CloudinaryService
+        private cloudinaryService: CloudinaryService,
+        private mailerService: MailerService
     ) { }
 
     async signup(
@@ -70,7 +72,15 @@ export class AuthService {
             throw error;
         }
         
-        return { message: 'User registered successfully', userId: user._id, otp: otp };
+        // Send OTP via email
+        try {
+            await this.mailerService.sendOtpEmail(dto.email, otp, dto.name);
+        } catch (error) {
+            // If email fails, still return success but log the error
+            console.error('Failed to send OTP email:', error.message);
+        }
+        
+        return { message: 'User registered successfully. OTP sent to your email.', userId: user._id };
     }
 
     async verifyOtp(phone: string, otp: string) {
@@ -83,7 +93,7 @@ export class AuthService {
         
         // Return tokens along with user data
         return { 
-            message: 'Phone number verified successfully', 
+            message: 'Email verified successfully', 
             ...tokens,
             user: {
                 id: user._id,
@@ -91,9 +101,27 @@ export class AuthService {
                 email: user.email,
                 phone: user.phone,
                 isPhoneVerified: true,
-                role: user.role || 'user'
+                role: user.role || 'user',
+                registrationFeePaid: (user as any).registrationFeePaid || false
             }
         };
+    }
+
+    async resendOtp(email: string) {
+        const user = await this.userService.findByEmail(email);
+        if (!user) throw new BadRequestException('User not found');
+        if (user.isPhoneVerified) throw new BadRequestException('Email already verified');
+        
+        const otp = await this.generateOtp();
+        await user.updateOne({ otp });
+        
+        try {
+            await this.mailerService.sendOtpEmail(email, otp, user.name);
+        } catch (error) {
+            console.error('Failed to resend OTP email:', error.message);
+        }
+        
+        return { message: 'OTP resent to your email' };
     }
 
     async login(phone: string, password: string) {
@@ -114,7 +142,8 @@ export class AuthService {
                 email: user.email,
                 phone: user.phone,
                 isPhoneVerified: user.isPhoneVerified,
-                role: user.role || 'user'
+                role: user.role || 'user',
+                registrationFeePaid: (user as any).registrationFeePaid || false
             }
         };
     }
@@ -140,6 +169,50 @@ export class AuthService {
         await this.userService.updatePassword(userId, hashedPassword);
         
         return { message: 'Password changed successfully' };
+    }
+
+    async selectRole(userId: string, dto: {
+        role: string;
+        shopName?: string;
+        shopLocation?: string;
+        shopType?: string;
+        shopDescription?: string;
+    }) {
+        const user = await this.userService.findById(userId);
+        if (!user) throw new BadRequestException('User not found');
+        
+        if (dto.role === 'user') {
+            // User role - just confirm entry
+            return { message: 'Welcome! You can now enter the system.', role: 'user' };
+        } else if (dto.role === 'shopkeeper') {
+            // Validate shopkeeper fields
+            if (!dto.shopName || !dto.shopLocation || !dto.shopType) {
+                throw new BadRequestException('Shop name, location and type are required for shopkeeper registration');
+            }
+            
+            // Update user with shopkeeper info
+            await this.userService.updateProfile(userId, {
+                shopName: dto.shopName,
+                shopLocation: dto.shopLocation,
+                shopType: dto.shopType,
+                shopDescription: dto.shopDescription,
+                shopkeeperStatus: 'pending',
+            } as any);
+
+            // Notify admin via email
+            const adminEmails = await this.userService.findAdminEmails();
+            for (const adminEmail of adminEmails) {
+                await this.mailerService.sendAdminNewShopkeeperRequest(adminEmail, dto.shopName, user.name);
+            }
+
+            return { 
+                message: 'Shopkeeper application submitted. Admin will review your request.', 
+                role: 'user',
+                shopkeeperStatus: 'pending' 
+            };
+        } else {
+            throw new BadRequestException('Invalid role. Must be "user" or "shopkeeper".');
+        }
     }
 
     async refreshToken(refreshToken: string) {

@@ -38,12 +38,24 @@ export class UsersService {
                 { email: { $regex: query.search, $options: 'i' } },
             ];
         }
-        return this.userModel
+        const users = await this.userModel
             .find(filter)
             .select('-password -refreshToken -otp')
             .sort({ createdAt: -1 })
             .limit(query?.limit || 200)
             .exec();
+
+        const usersWithReferralCount = await Promise.all(
+            users.map(async (user) => {
+                const referralCount = await this.userModel.countDocuments({ referredBy: user._id });
+                return {
+                    ...(user.toObject() as any),
+                    referralCount,
+                };
+            }),
+        );
+
+        return usersWithReferralCount as any;
     }
 
     async updateRole(userId: string, role: string): Promise<User | null> {
@@ -73,5 +85,33 @@ export class UsersService {
             this.userModel.countDocuments({ role: 'admin' }),
         ]);
         return { total, users: total - shopkeepers - admins, shopkeepers, admins };
+    }
+
+    async findByReferralCode(referralCode: string): Promise<User | null> {
+        return this.userModel.findOne({ referralCode }).exec();
+    }
+
+    async generateUniqueReferralCode(): Promise<string> {
+        let code: string;
+        let exists = true;
+        while (exists) {
+            code = Math.random().toString(36).substring(2, 8).toUpperCase();
+            exists = !!(await this.userModel.findOne({ referralCode: code }));
+        }
+        return code!;
+    }
+
+    async findAdminEmails(): Promise<string[]> {
+        const admins = await this.userModel.find({ role: 'admin' }).select('email').exec();
+        return admins.map(a => a.email);
+    }
+
+    async countReferrals(userId: string): Promise<number> {
+        return this.userModel.countDocuments({ referredBy: userId });
+    }
+
+    async deleteUser(userId: string): Promise<boolean> {
+        const deleted = await this.userModel.findByIdAndDelete(userId).exec();
+        return !!deleted;
     }
 }

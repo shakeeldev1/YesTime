@@ -6,6 +6,8 @@ import { GameDraw } from './schemas/game-draw.schema';
 import { GamePayment } from './schemas/game-payment.schema';
 import { GameNotification } from './schemas/game-notification.schema';
 import { WalletService } from '../wallet/wallet.service';
+import { User } from '../users/schemas/user.schema';
+import { MailerService } from '../mailer/mailer.service';
 
 @Injectable()
 export class GameService {
@@ -18,7 +20,9 @@ export class GameService {
     @InjectModel(GameDraw.name) private readonly drawModel: Model<GameDraw>,
     @InjectModel(GamePayment.name) private readonly paymentModel: Model<GamePayment>,
     @InjectModel(GameNotification.name) private readonly notificationModel: Model<GameNotification>,
+    @InjectModel(User.name) private readonly userModel: Model<User>,
     private readonly walletService: WalletService,
+    private readonly mailerService: MailerService,
   ) {}
 
   // Generate a unique 6-digit coupon number
@@ -326,6 +330,18 @@ export class GameService {
       // Update cycle status
       winner.status = 'won';
       await winner.save();
+
+      // Send email notification to winner
+      const winnerUser = await this.userModel.findById(winner.userId);
+      if (winnerUser) {
+        await this.mailerService.sendLotteryWinEmail(
+          winnerUser.email,
+          winnerUser.name,
+          winner.couponNumber,
+          prizeAmount,
+          'Daily Bonus',
+        );
+      }
 
       // Notify winner
       await this.createNotification(

@@ -5,11 +5,13 @@ import { CarWinnerService } from './car-winner.service';
 import { CarWinner, CarWinnerSchema } from './schemas/car-winner.schema';
 import { CarParticipationModule } from 'src/car-participation/car-participation.module';
 import { CarDrawScheduler } from './car-draw.scheduler';
+import { User, UserSchema } from 'src/users/schemas/user.schema';
 
 @Module({
   imports: [
     MongooseModule.forFeature([
-      { name: CarWinner.name, schema: CarWinnerSchema }
+      { name: CarWinner.name, schema: CarWinnerSchema },
+      { name: User.name, schema: UserSchema }
     ]),
     CarParticipationModule
   ],

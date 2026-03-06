@@ -2,8 +2,8 @@ import { Prop, Schema, SchemaFactory } from "@nestjs/mongoose";
 import { Types } from "mongoose";
 
 export enum ParticipationPhase {
-    PRE_WIN = 'pre-win', // Paying 1500/month
-    POST_WIN = 'post-win', // Paying 36000/month after winning
+    PRE_WIN = 'pre-win', // Paying 50-1500/day
+    POST_WIN = 'post-win', // Paying 36000/month after winning/direct car
     COMPLETED = 'completed' // Fully paid 3000000
 }
 
@@ -28,7 +28,7 @@ export class CarParticipation {
     hasWon!: boolean;
 
     @Prop({default:false})
-    carAwarded!: boolean; // Car given (either by winning or reaching 546000)
+    carAwarded!: boolean;
 
     @Prop({type:String, enum: ParticipationPhase, default: ParticipationPhase.PRE_WIN})
     phase!: ParticipationPhase;
@@ -44,6 +44,10 @@ export class CarParticipation {
 
     @Prop()
     winDate?: Date;
+
+    // Referral tracking
+    @Prop({ type: Types.ObjectId, ref: 'User' })
+    referredBy?: Types.ObjectId;
 }
 
 export const CarParticipationSchema = SchemaFactory.createForClass(CarParticipation);

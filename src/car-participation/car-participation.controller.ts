@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Request, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Body, Request, UseGuards } from '@nestjs/common';
 import { JwtAuthGuard } from 'src/auth/guards/jwt-auth.guard';
 import { CarParticipationService } from './car-participation.service';
 
@@ -8,8 +8,8 @@ export class CarParticipationController {
 
     @Post("join")
     @UseGuards(JwtAuthGuard)
-    join(@Request() req) {
-        return this.carParticipationService.join(req.user.userId);
+    join(@Request() req, @Body() body?: { referredByUserId?: string }) {
+        return this.carParticipationService.join(req.user.userId, body?.referredByUserId);
     }
 
     @Get("my-participation")

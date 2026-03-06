@@ -79,6 +79,13 @@ export class CashbackController {
     return this.cashbackService.getShopkeeperStats();
   }
 
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('admin')
+  @Delete('shopkeeper/:id')
+  async deleteShopkeeper(@Param('id') id: string) {
+    return this.cashbackService.deleteShopkeeper(id);
+  }
+
   @UseGuards(JwtAuthGuard)
   @Get('shopkeeper/:id')
   async getShopkeeperById(@Param('id') id: string) {

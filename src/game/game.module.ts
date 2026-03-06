@@ -8,6 +8,7 @@ import { GamePayment, GamePaymentSchema } from './schemas/game-payment.schema';
 import { GameNotification, GameNotificationSchema } from './schemas/game-notification.schema';
 import { GameDrawScheduler } from './game-draw.scheduler';
 import { WalletModule } from '../wallet/wallet.module';
+import { User, UserSchema } from '../users/schemas/user.schema';
 
 @Module({
   imports: [
@@ -16,6 +17,7 @@ import { WalletModule } from '../wallet/wallet.module';
       { name: GameDraw.name, schema: GameDrawSchema },
       { name: GamePayment.name, schema: GamePaymentSchema },
       { name: GameNotification.name, schema: GameNotificationSchema },
+      { name: User.name, schema: UserSchema },
     ]),
     WalletModule,
   ],

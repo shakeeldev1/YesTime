@@ -27,6 +27,11 @@ export class AuthController {
         return this.authService.verifyOtp(dto.phone, dto.otp);
     }
 
+    @Post('resend-otp')
+    resendOtp(@Body() dto: { email: string }) {
+        return this.authService.resendOtp(dto.email);
+    }
+
     @Post('login')
     login(@Body() dto:loginDto){
         return this.authService.login(dto.phone,dto.password);
@@ -42,6 +47,18 @@ export class AuthController {
     @Post('change-password')
     changePassword(@Request() req, @Body() dto: { currentPassword: string; newPassword: string }) {
         return this.authService.changePassword(req.user.userId, dto.currentPassword, dto.newPassword);
+    }
+
+    @UseGuards(JwtAuthGuard)
+    @Post('select-role')
+    selectRole(@Request() req, @Body() dto: { 
+        role: string; 
+        shopName?: string; 
+        shopLocation?: string; 
+        shopType?: string; 
+        shopDescription?: string;
+    }) {
+        return this.authService.selectRole(req.user.userId, dto);
     }
 
     @Post('refresh')
