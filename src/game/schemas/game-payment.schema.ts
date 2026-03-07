@@ -12,7 +12,7 @@ export class GamePayment extends Document {
   @Prop({ required: true })
   couponNumber!: string;
 
-  @Prop({ required: true, default: 25 })
+  @Prop({ required: true, default: 50 })
   amount!: number;
 
   @Prop({ required: true })

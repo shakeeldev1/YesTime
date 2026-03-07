@@ -11,7 +11,7 @@ import { MailerService } from '../mailer/mailer.service';
 
 @Injectable()
 export class GameService {
-  private readonly DAILY_AMOUNT = 25;
+  private readonly DAILY_AMOUNT = 50;
   private readonly CYCLE_DAYS = 30;
   private readonly BASE_PRIZE = 1000; // Day 1 prize; increases by 1000 each day
 
@@ -53,7 +53,7 @@ export class GameService {
     // Check wallet balance
     const balance = await this.walletService.getBalance(userId);
     if (balance < this.DAILY_AMOUNT) {
-      throw new BadRequestException('Insufficient wallet balance. You need at least PKR 25');
+      throw new BadRequestException(`Insufficient wallet balance. You need at least PKR ${this.DAILY_AMOUNT}`);
     }
 
     // Debit wallet
@@ -109,7 +109,7 @@ export class GameService {
   }
 
   // ============================
-  // DAILY PAYMENT (add 25 more)
+  // DAILY PAYMENT (add daily amount)
   // ============================
   async makeDailyPayment(userId: string) {
     const cycle = await this.cycleModel.findOne({ userId, status: 'active' });
@@ -136,7 +136,7 @@ export class GameService {
     // Check wallet balance
     const balance = await this.walletService.getBalance(userId);
     if (balance < this.DAILY_AMOUNT) {
-      throw new BadRequestException('Insufficient wallet balance. You need at least PKR 25');
+      throw new BadRequestException(`Insufficient wallet balance. You need at least PKR ${this.DAILY_AMOUNT}`);
     }
 
     // Debit wallet

@@ -15,7 +15,7 @@ export class GameCycle extends Document {
   @Prop({ required: true, default: 0 })
   totalSavings!: number;
 
-  @Prop({ required: true, default: 25 })
+  @Prop({ required: true, default: 50 })
   dailyAmount!: number;
 
   @Prop({ required: true, default: 30 })
