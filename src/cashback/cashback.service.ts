@@ -315,6 +315,9 @@ export class CashbackService {
     if (!shopkeeper) {
       throw new NotFoundException('Shopkeeper not found');
     }
+    if (shopkeeper.status !== 'active') {
+      throw new BadRequestException('Your shopkeeper account is pending admin approval. You cannot record sales yet.');
+    }
     if (shopkeeper.userId.toString() !== shopkeeperUserId) {
       throw new BadRequestException('You can only record purchases for your own shop');
     }

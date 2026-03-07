@@ -5,6 +5,7 @@ import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcryptjs';
 import { CloudinaryService } from 'src/cloudinary/cloudinary.service';
 import { MailerService } from 'src/mailer/mailer.service';
+import { CashbackService } from 'src/cashback/cashback.service';
 
 @Injectable()
 export class AuthService {
@@ -12,7 +13,8 @@ export class AuthService {
         private userService: UsersService, 
         private jwtService: JwtService,
         private cloudinaryService: CloudinaryService,
-        private mailerService: MailerService
+        private mailerService: MailerService,
+        private cashbackService: CashbackService,
     ) { }
 
     async signup(
@@ -102,6 +104,7 @@ export class AuthService {
                 phone: user.phone,
                 isPhoneVerified: true,
                 role: user.role || 'user',
+                shopkeeperStatus: (user as any).shopkeeperStatus || 'none',
                 registrationFeePaid: (user as any).registrationFeePaid || false
             }
         };
@@ -143,6 +146,7 @@ export class AuthService {
                 phone: user.phone,
                 isPhoneVerified: user.isPhoneVerified,
                 role: user.role || 'user',
+                shopkeeperStatus: (user as any).shopkeeperStatus || 'none',
                 registrationFeePaid: (user as any).registrationFeePaid || false
             }
         };
@@ -182,22 +186,48 @@ export class AuthService {
         if (!user) throw new BadRequestException('User not found');
         
         if (dto.role === 'user') {
-            // User role - just confirm entry
-            return { message: 'Welcome! You can now enter the system.', role: 'user' };
+            await this.userService.updateRole(userId, 'user');
+            const updatedUser = await this.userService.updateProfile(userId, { shopkeeperStatus: 'none' } as any);
+            return {
+                message: 'Welcome! You can now enter the system.',
+                role: 'user',
+                user: {
+                    id: updatedUser?._id,
+                    name: updatedUser?.name,
+                    email: updatedUser?.email,
+                    phone: updatedUser?.phone,
+                    isPhoneVerified: updatedUser?.isPhoneVerified,
+                    role: updatedUser?.role || 'user',
+                    shopkeeperStatus: updatedUser?.shopkeeperStatus || 'none',
+                }
+            };
         } else if (dto.role === 'shopkeeper') {
             // Validate shopkeeper fields
             if (!dto.shopName || !dto.shopLocation || !dto.shopType) {
                 throw new BadRequestException('Shop name, location and type are required for shopkeeper registration');
             }
-            
-            // Update user with shopkeeper info
-            await this.userService.updateProfile(userId, {
+
+            // Set role immediately to shopkeeper and keep status pending until admin approval.
+            await this.userService.updateRole(userId, 'shopkeeper');
+
+            const updatedUser = await this.userService.updateProfile(userId, {
                 shopName: dto.shopName,
                 shopLocation: dto.shopLocation,
                 shopType: dto.shopType,
                 shopDescription: dto.shopDescription,
                 shopkeeperStatus: 'pending',
             } as any);
+
+            // Create or refresh cashback shopkeeper request so admin can approve from pending list.
+            const existingShop = await this.cashbackService.getMyShop(userId);
+            if (!existingShop || existingShop.status === 'rejected') {
+                await this.cashbackService.requestShopkeeper(userId, {
+                    shopName: dto.shopName,
+                    ownerName: user.name,
+                    phone: user.phone,
+                    address: dto.shopLocation,
+                } as any);
+            }
 
             // Notify admin via email
             const adminEmails = await this.userService.findAdminEmails();
@@ -207,8 +237,17 @@ export class AuthService {
 
             return { 
                 message: 'Shopkeeper application submitted. Admin will review your request.', 
-                role: 'user',
-                shopkeeperStatus: 'pending' 
+                role: 'shopkeeper',
+                shopkeeperStatus: 'pending',
+                user: {
+                    id: updatedUser?._id,
+                    name: updatedUser?.name,
+                    email: updatedUser?.email,
+                    phone: updatedUser?.phone,
+                    isPhoneVerified: updatedUser?.isPhoneVerified,
+                    role: 'shopkeeper',
+                    shopkeeperStatus: 'pending',
+                }
             };
         } else {
             throw new BadRequestException('Invalid role. Must be "user" or "shopkeeper".');
