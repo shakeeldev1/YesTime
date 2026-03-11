@@ -14,10 +14,21 @@ import { GameModule } from './game/game.module';
 import { CashbackModule } from './cashback/cashback.module';
 import { MailerModule } from './mailer/mailer.module';
 import { RegistrationLotteryModule } from './registration-lottery/registration-lottery.module';
+import * as dotenv from 'dotenv';
+import { join } from 'path';
+
+// Always load the server .env file regardless of where the process is started from.
+dotenv.config({ path: join(__dirname, '..', '.env') });
+
+const mongoUri = process.env.MONGO_URI;
+
+if (!mongoUri) {
+  throw new Error('MONGO_URI is missing. Check server/.env');
+}
 
 @Module({
   imports: [
-    MongooseModule.forRoot(process.env.MONGO_URI || ''), 
+    MongooseModule.forRoot(mongoUri),
     ScheduleModule.forRoot(),
     AuthModule, 
     UsersModule, 
