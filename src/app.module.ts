@@ -17,7 +17,6 @@ import { RegistrationLotteryModule } from './registration-lottery/registration-l
 import * as dotenv from 'dotenv';
 import { join } from 'path';
 
-// Always load the server .env file regardless of where the process is started from.
 dotenv.config({ path: join(__dirname, '..', '.env') });
 
 const mongoUri = process.env.MONGO_URI;
