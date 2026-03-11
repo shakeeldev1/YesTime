@@ -23,8 +23,8 @@ export class AuthController {
     }
 
     @Post('verify-otp')
-    verifyOtp(@Body() dto: { phone: string, otp: string }) {
-        return this.authService.verifyOtp(dto.phone, dto.otp);
+    verifyOtp(@Body() dto: { email: string, otp: string }) {
+        return this.authService.verifyOtp(dto.email, dto.otp);
     }
 
     @Post('resend-otp')
@@ -34,7 +34,7 @@ export class AuthController {
 
     @Post('login')
     login(@Body() dto:loginDto){
-        return this.authService.login(dto.phone,dto.password);
+        return this.authService.login(dto.email,dto.password);
     }
 
     @UseGuards(JwtAuthGuard)

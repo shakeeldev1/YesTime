@@ -85,8 +85,8 @@ export class AuthService {
         return { message: 'User registered successfully. OTP sent to your email.', userId: user._id };
     }
 
-    async verifyOtp(phone: string, otp: string) {
-        const user = await this.userService.findByPhone(phone);
+    async verifyOtp(email: string, otp: string) {
+        const user = await this.userService.findByEmail(email);
         if (!user) throw new BadRequestException('User not found');
         if (user.otp !== otp) throw new BadRequestException('Invalid OTP');
         await user.updateOne({ isPhoneVerified: true, otp: null });
@@ -127,11 +127,11 @@ export class AuthService {
         return { message: 'OTP resent to your email' };
     }
 
-    async login(phone: string, password: string) {
-        const user = await this.userService.findByPhone(phone);
-        if (!user) throw new BadRequestException('Invalid phone number or password');
+    async login(email: string, password: string) {
+        const user = await this.userService.findByEmail(email);
+        if (!user) throw new BadRequestException('Invalid email or password');
         const passwordMatches = await bcrypt.compare(password, user.password);
-        if (!passwordMatches) throw new BadRequestException('Invalid phone number or password');
+        if (!passwordMatches) throw new BadRequestException('Invalid email or password');
 
         const tokens = await this.signToken(user._id.toString(), user.role || 'user');
         await this.saveRefreshToken(user._id.toString(), tokens.refreshToken);
