@@ -21,14 +21,7 @@ export class AuthService {
         dto: SignupDto, 
         files?: { cnicFront?: Express.Multer.File[], cnicBack?: Express.Multer.File[] }
     ) {
-        const [existingPhoneUser, existingEmailUser] = await Promise.all([
-            this.userService.findByPhone(dto.phone),
-            this.userService.findByEmail(dto.email),
-        ]);
-
-        if (existingPhoneUser) {
-            throw new BadRequestException('User with this phone number already exists');
-        }
+        const existingEmailUser = await this.userService.findByEmail(dto.email);
 
         if (existingEmailUser) {
             throw new BadRequestException('User with this email already exists');
@@ -65,9 +58,6 @@ export class AuthService {
                 const duplicateField = Object.keys(error?.keyPattern || {})[0];
                 if (duplicateField === 'email') {
                     throw new BadRequestException('User with this email already exists');
-                }
-                if (duplicateField === 'phone') {
-                    throw new BadRequestException('User with this phone number already exists');
                 }
                 throw new BadRequestException('User already exists with provided details');
             }
@@ -167,7 +157,6 @@ export class AuthService {
         if (!passwordMatches) throw new BadRequestException('Current password is incorrect');
         
         if (currentPassword === newPassword) throw new BadRequestException('New password must be different from current password');
-        if (newPassword.length < 6) throw new BadRequestException('New password must be at least 6 characters');
         
         const hashedPassword = await bcrypt.hash(newPassword, 10);
         await this.userService.updatePassword(userId, hashedPassword);

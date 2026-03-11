@@ -17,7 +17,7 @@ import { RegistrationLotteryModule } from './registration-lottery/registration-l
 
 @Module({
   imports: [
-    MongooseModule.forRoot('mongodb://localhost/yes-time'), 
+    MongooseModule.forRoot(process.env.MONGO_URI || ''), 
     ScheduleModule.forRoot(),
     AuthModule, 
     UsersModule, 
