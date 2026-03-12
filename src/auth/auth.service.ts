@@ -30,7 +30,6 @@ export class AuthService {
         const hashedPassword = await bcrypt.hash(dto.password, 10);
         const otp = await this.generateOtp();
         
-        // Upload CNIC images to Cloudinary if provided
         let cnicFrontUrl: string | undefined;
         let cnicBackUrl: string | undefined;
         
@@ -64,12 +63,11 @@ export class AuthService {
             throw error;
         }
         
-        // Send OTP via email
         try {
             await this.mailerService.sendOtpEmail(dto.email, otp, dto.name);
         } catch (error) {
             // If email fails, still return success but log the error
-            console.error('Failed to send OTP email:', error.message);
+            console.error('Failed to send OTP email:', error instanceof Error ? error.message : String(error));
         }
         
         return { message: 'User registered successfully. OTP sent to your email.', userId: user._id };
@@ -111,7 +109,7 @@ export class AuthService {
         try {
             await this.mailerService.sendOtpEmail(email, otp, user.name);
         } catch (error) {
-            console.error('Failed to resend OTP email:', error.message);
+            console.error('Failed to resend OTP email:', error instanceof Error ? error.message : String(error));
         }
         
         return { message: 'OTP resent to your email' };
