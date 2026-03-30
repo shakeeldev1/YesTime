@@ -3,8 +3,8 @@ import { Types } from "mongoose";
 
 @Schema({timestamps:true})
 export class SpinnerDraw {
-    @Prop({required:true})
-    drawNumber!: number;
+    @Prop()
+    drawNumber?: number;
 
     @Prop({required:true})
     drawDate!: Date;

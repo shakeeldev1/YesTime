@@ -3,6 +3,7 @@ import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { CarParticipation, ParticipationPhase, ParticipationStatus } from 'src/car-participation/schemas/car-participation.schema';
 import { CarWinner } from './schemas/car-winner.schema';
+import { SpinnerDraw } from './schemas/spinner-draw.schema';
 import { User } from 'src/users/schemas/user.schema';
 import { MailerService } from 'src/mailer/mailer.service';
 
@@ -11,6 +12,7 @@ export class CarWinnerService {
     constructor(
         @InjectModel(CarParticipation.name) private carParticipationModel: Model<CarParticipation>,
         @InjectModel(CarWinner.name) private carWinnerModel: Model<CarWinner>,
+        @InjectModel(SpinnerDraw.name) private spinnerDrawModel: Model<SpinnerDraw>,
         @InjectModel(User.name) private userModel: Model<User>,
         private mailerService: MailerService
     ) { }
@@ -28,13 +30,30 @@ export class CarWinnerService {
         }).populate('userId');
 
         const drawDate = new Date();
+        const winningCoupon = this.generateRandom6DigitCoupon();
+        let winner: any = null;
 
-        if (eligibleParticipations.length === 0) {
-            return { message: 'No eligible participants for this draw', winner: null };
+        if (eligibleParticipations.length > 0) {
+            winner = eligibleParticipations.find((participant) => participant.coupenNumber === winningCoupon) || null;
         }
 
-        const winningCoupon = this.generateRandom6DigitCoupon();
-        const winner = eligibleParticipations.find((participant) => participant.coupenNumber === winningCoupon);
+        // Record only the latest spinner draw (delete previous to keep one document)
+        const latestPrev = await this.spinnerDrawModel.findOne().sort({ drawDate: -1 });
+
+        const spinnerDoc = {
+            drawDate,
+            winningCoupen: winningCoupon,
+            winnerId: winner ? winner.userId : undefined,
+            status: 'completed',
+            spinStartTime: drawDate,
+            spinEndTime: new Date()
+        } as any; // intentionally not storing drawNumber to save space
+
+        // Remove old spinner draws and insert the latest one (keeps collection size to 1)
+        await this.spinnerDrawModel.deleteMany({});
+        const spinnerDraw = new this.spinnerDrawModel(spinnerDoc);
+        await spinnerDraw.save();
+        console.debug('[CarWinner] spinnerSaved (only latest kept)', { winningCoupen: spinnerDraw.winningCoupen, drawDate: spinnerDraw.drawDate });
 
         if (!winner) {
             return {
@@ -88,18 +107,33 @@ export class CarWinnerService {
         const totalWinners = await this.carWinnerModel.countDocuments();
         const latestWinner = await this.carWinnerModel.findOne().sort({ winningDate: -1 });
 
+        // Prefer latest spinner draw (generated every minute) for lastDraw info
+        const latestSpinner = await this.spinnerDrawModel.findOne().sort({ drawDate: -1 });
+
+        const computeDrawNumberFromDate = (d: Date) => Math.floor(d.getTime() / 60000) % 1000000; // minute index mod 1e6
+
+        let lastDraw: any = null;
+        if (latestSpinner && latestSpinner.drawDate) {
+            // Return only the last generated random coupon and its timestamp
+            lastDraw = {
+                winningCoupen: latestSpinner.winningCoupen || null,
+                drawDate: latestSpinner.drawDate || null,
+            };
+        } else if (latestWinner) {
+            lastDraw = {
+                winningCoupen: latestWinner.winningCoupen,
+                drawDate: latestWinner.winningDate,
+            };
+        }
+
+        console.debug('[CarWinner] getNextDrawInfo', { totalWinners, lastDrawExists: !!lastDraw });
+
         return {
             serverTime: now,
             nextDrawTime,
             countdown,
-            drawNumber: totalWinners + 1,
-            lastDraw: latestWinner
-                ? {
-                    drawNumber: totalWinners,
-                    winningCoupen: latestWinner.winningCoupen,
-                    drawDate: latestWinner.winningDate,
-                }
-                : null,
+            drawNumber: computeDrawNumberFromDate(nextDrawTime) + 1,
+            lastDraw,
         };
     }
 
