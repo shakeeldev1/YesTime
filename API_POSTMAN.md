@@ -64,7 +64,7 @@
     { "name": "My Contributions", "method": "GET", "url": "/car-contributions/my", "authRequired": true },
     { "name": "Contribution Stats", "method": "GET", "url": "/car-contributions/stats", "authRequired": true },
 
-    { "name": "Car Winner - Next Draw", "method": "GET", "url": "/car-winner/next-draw", "authRequired": false },
+    { "name": "Car Winner - Next Draw", "method": "GET", "url": "/", "authRequired": false },
     { "name": "Car Winner - All", "method": "GET", "url": "/car-winner/all", "authRequired": false },
     { "name": "Car Winner - Draw History", "method": "GET", "url": "/car-winner/draw-history", "authRequired": false, "query": { "limit?": "number" } },
     { "name": "Car Winner - Stats", "method": "GET", "url": "/car-winner/stats", "authRequired": false },

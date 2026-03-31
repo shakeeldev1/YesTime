@@ -57,7 +57,8 @@ export class CarContributionsService {
         await contribution.save();
 
         // Update participation
-        carParticipation.totalPaid += amount;
+        // Ensure totalPaid is a number (avoid string concatenation if it's stored as string)
+        carParticipation.totalPaid = Number(carParticipation.totalPaid || 0) + Number(amount);
         carParticipation.lastPaymentDate = new Date();
 
         // Process referral bonus
@@ -166,16 +167,18 @@ export class CarContributionsService {
 
         const contributions = await this.carContributionModel.find({ userId });
         const totalContributions = contributions.length;
+        // contributions use `createdAt` timestamp from mongoose timestamps
         const lastPayment = contributions.length > 0 
-            ? contributions.sort((a, b) => b.date.getTime() - a.date.getTime())[0] 
+            ? contributions.sort((a, b) => new Date((b as any).createdAt).getTime() - new Date((a as any).createdAt).getTime())[0]
             : null;
 
         let targetAmount = CAR_PRICE;
-        let progressPercentage = (participation.totalPaid / targetAmount) * 100;
+        // Ensure numeric math for progress
+        let progressPercentage = (Number(participation.totalPaid || 0) / targetAmount) * 100;
 
         if (participation.phase === ParticipationPhase.PRE_WIN) {
             targetAmount = THRESHOLD_AMOUNT;
-            progressPercentage = (participation.totalPaid / targetAmount) * 100;
+            progressPercentage = (Number(participation.totalPaid || 0) / targetAmount) * 100;
         }
 
         // Get referral info
