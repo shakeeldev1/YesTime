@@ -104,6 +104,7 @@
       "method": "POST",
       "url": "/cashback/shopkeeper/request",
       "authRequired": true,
+      "role": "user",
       "bodyDto": "server/src/cashback/dto/cashback.dto.ts",
       "requiredFields": [
         { "name": "shopName", "type": "string" },
@@ -117,40 +118,51 @@
       "method": "POST",
       "url": "/cashback/shopkeeper/register",
       "authRequired": true,
+      "role": "user",
       "bodyDto": "server/src/cashback/dto/cashback.dto.ts",
       "requiredFields": ["shopName","ownerName","phone"]
     },
-    { "name": "Cashback - My Shop", "method": "GET", "url": "/cashback/shopkeeper/my-shop", "authRequired": true },
-    { "name": "Cashback - Get Shopkeeper By ID", "method": "GET", "url": "/cashback/shopkeeper/:id", "authRequired": true, "params": { "id": "string" } },
+    { "name": "Cashback - My Shop", "method": "GET", "url": "/cashback/shopkeeper/my-shop", "authRequired": true, "role": "shopkeeper" },
+    { "name": "Cashback - Get Shopkeeper By ID", "method": "GET", "url": "/cashback/shopkeeper/:id", "authRequired": true, "role": "user", "params": { "id": "string" } },
     {
       "name": "Cashback - Record Purchase",
       "method": "POST",
       "url": "/cashback/purchase",
       "authRequired": true,
+      "role": "shopkeeper",
       "bodyDto": "server/src/cashback/dto/cashback.dto.ts",
       "requiredFields": [
-        { "name": "shopkeeperId", "type": "string (MongoId)" },
         { "name": "customerCoupon", "type": "string" },
         { "name": "amount", "type": "number (>=1)" }
       ],
-      "optionalFields": [ { "name": "description", "type": "string" } ]
+      "optionalFields": [
+        { "name": "shopkeeperId", "type": "string (MongoId) — optional; server will use logged-in shopkeeper if omitted" },
+        { "name": "description", "type": "string" }
+      ],
+      "example": {
+        "body": {
+          "customerCoupon": "123456",
+          "amount": 500,
+          "description": "Grocery purchase"
+        }
+      }
     },
-    { "name": "Cashback - My Purchases", "method": "GET", "url": "/cashback/purchases/my", "authRequired": true, "query": { "limit?": "number" } },
-    { "name": "Cashback - Shop Purchases", "method": "GET", "url": "/cashback/purchases/shop/:shopkeeperId", "authRequired": true, "params": { "shopkeeperId": "string" } },
-    { "name": "Cashback - Shopkeeper Purchases", "method": "GET", "url": "/cashback/purchases/shopkeeper/:shopkeeperId", "authRequired": true, "params": { "shopkeeperId": "string" } },
-    { "name": "Cashback - Join", "method": "POST", "url": "/cashback/join", "authRequired": true },
-    { "name": "Cashback - Active Cycle", "method": "GET", "url": "/cashback/active-cycle", "authRequired": true },
-    { "name": "Cashback - My Cycles", "method": "GET", "url": "/cashback/my-cycles", "authRequired": true },
-    { "name": "Cashback - Commitment Table", "method": "GET", "url": "/cashback/commitment-table", "authRequired": true },
-    { "name": "Cashback - Draw History", "method": "GET", "url": "/cashback/draw/history", "authRequired": false },
-    { "name": "Cashback - Next Draw", "method": "GET", "url": "/cashback/draw/next", "authRequired": false },
-    { "name": "Cashback - Winning History", "method": "GET", "url": "/cashback/draw/winning-history", "authRequired": true },
-    { "name": "Cashback - Dashboard Stats", "method": "GET", "url": "/cashback/dashboard-stats", "authRequired": true },
-    { "name": "Cashback - Notifications", "method": "GET", "url": "/cashback/notifications", "authRequired": true, "query": { "limit?": "number" } },
-    { "name": "Cashback - Unread Count", "method": "GET", "url": "/cashback/notifications/unread-count", "authRequired": true },
-    { "name": "Cashback - Mark Notification Read", "method": "POST", "url": "/cashback/notifications/:id/read", "authRequired": true, "params": { "id": "string" } },
-    { "name": "Cashback - Mark All Read", "method": "POST", "url": "/cashback/notifications/mark-all-read", "authRequired": true },
-    { "name": "Cashback - Delete Notification", "method": "DELETE", "url": "/cashback/notifications/:id", "authRequired": true, "params": { "id": "string" } },
+    { "name": "Cashback - My Purchases", "method": "GET", "url": "/cashback/purchases/my", "authRequired": true, "role": "customer", "query": { "limit?": "number" } },
+    { "name": "Cashback - Shop Purchases", "method": "GET", "url": "/cashback/purchases/shop/:shopkeeperId", "authRequired": true, "role": "shopkeeper|admin", "params": { "shopkeeperId": "string" } },
+    { "name": "Cashback - Shopkeeper Purchases", "method": "GET", "url": "/cashback/purchases/shopkeeper/:shopkeeperId", "authRequired": true, "role": "shopkeeper", "params": { "shopkeeperId": "string" } },
+    { "name": "Cashback - Join", "method": "POST", "url": "/cashback/join", "authRequired": true, "role": "customer" },
+    { "name": "Cashback - Active Cycle", "method": "GET", "url": "/cashback/active-cycle", "authRequired": true, "role": "customer" },
+    { "name": "Cashback - My Cycles", "method": "GET", "url": "/cashback/my-cycles", "authRequired": true, "role": "customer" },
+    { "name": "Cashback - Commitment Table", "method": "GET", "url": "/cashback/commitment-table", "authRequired": true, "role": "customer" },
+    { "name": "Cashback - Draw History", "method": "GET", "url": "/cashback/draw/history", "authRequired": false, "role": "public" },
+    { "name": "Cashback - Next Draw", "method": "GET", "url": "/cashback/draw/next", "authRequired": false, "role": "public" },
+    { "name": "Cashback - Winning History", "method": "GET", "url": "/cashback/draw/winning-history", "authRequired": true, "role": "customer" },
+    { "name": "Cashback - Dashboard Stats", "method": "GET", "url": "/cashback/dashboard-stats", "authRequired": true, "role": "user" },
+    { "name": "Cashback - Notifications", "method": "GET", "url": "/cashback/notifications", "authRequired": true, "role": "user", "query": { "limit?": "number" } },
+    { "name": "Cashback - Unread Count", "method": "GET", "url": "/cashback/notifications/unread-count", "authRequired": true, "role": "user" },
+    { "name": "Cashback - Mark Notification Read", "method": "POST", "url": "/cashback/notifications/:id/read", "authRequired": true, "role": "user", "params": { "id": "string" } },
+    { "name": "Cashback - Mark All Read", "method": "POST", "url": "/cashback/notifications/mark-all-read", "authRequired": true, "role": "user" },
+    { "name": "Cashback - Delete Notification", "method": "DELETE", "url": "/cashback/notifications/:id", "authRequired": true, "role": "user", "params": { "id": "string" } },
 
     { "name": "Profile - Get Me", "method": "GET", "url": "/profile/me", "authRequired": true },
     {

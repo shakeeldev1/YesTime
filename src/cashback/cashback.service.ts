@@ -306,18 +306,24 @@ export class CashbackService {
   // ========== PURCHASE / SHOPPING ==========
 
   async recordPurchase(shopkeeperUserId: string, dto: RecordPurchaseDto) {
-    const shopkeeper = await this.shopkeeperModel.findById(dto.shopkeeperId);
+    // Resolve shopkeeper: prefer provided shopkeeperId, otherwise use logged-in user's shop
+    let shopkeeper: Shopkeeper | null = null;
+    if (dto.shopkeeperId) {
+      shopkeeper = await this.shopkeeperModel.findById(dto.shopkeeperId);
+    } else {
+      shopkeeper = await this.shopkeeperModel.findOne({ userId: new Types.ObjectId(shopkeeperUserId) });
+    }
+
     if (!shopkeeper) {
       throw new NotFoundException('Shopkeeper not found');
     }
+
     if (shopkeeper.status !== 'active') {
       throw new BadRequestException('Your shopkeeper account is pending admin approval. You cannot record sales yet.');
     }
+
     if (shopkeeper.userId.toString() !== shopkeeperUserId) {
       throw new BadRequestException('You can only record purchases for your own shop');
-    }
-    if (shopkeeper.status !== 'active') {
-      throw new BadRequestException('Shop is not active');
     }
 
     // Find the customer cycle by coupon
@@ -355,7 +361,6 @@ export class CashbackService {
     await shopkeeper.save();
 
     // Add the full shopping amount to customer's cashback cycle
-    const oldLevel = cycle.currentLevel;
     cycle.totalShopping += dto.amount;
     const { level, committed, remaining } = this.calculateLevel(cycle.totalShopping);
     cycle.currentLevel = level;

@@ -16,8 +16,9 @@ export class RegisterShopkeeperDto {
 }
 
 export class RecordPurchaseDto {
+  @IsOptional()
   @IsMongoId()
-  shopkeeperId!: string;
+  shopkeeperId?: string;
 
   @IsString()
   customerCoupon!: string;
