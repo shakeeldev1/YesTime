@@ -249,6 +249,48 @@ export class CashbackService {
       .limit(limit);
   }
 
+  /**
+   * Sales overview for shopkeeper used by graphs.
+   * range: 'daily' | 'monthly' | 'yearly'
+   * optional start/end filter as ISO date strings (YYYY-MM-DD)
+   */
+  async getShopkeeperSalesOverview(shopkeeperUserId: string, range = 'daily', start?: string, end?: string) {
+    const shopkeeper = await this.shopkeeperModel.findOne({ userId: new Types.ObjectId(shopkeeperUserId) });
+    if (!shopkeeper) throw new NotFoundException('Shopkeeper not found');
+
+    const match: any = { shopkeeperId: shopkeeper._id };
+    if (start || end) {
+      match.createdAt = {};
+      if (start) match.createdAt.$gte = new Date(start);
+      if (end) {
+        // include entire end day
+        const endDate = new Date(end);
+        endDate.setHours(23, 59, 59, 999);
+        match.createdAt.$lte = endDate;
+      }
+    }
+
+    let dateFormat = '%Y-%m-%d';
+    if (range === 'monthly') dateFormat = '%Y-%m';
+    else if (range === 'yearly') dateFormat = '%Y';
+
+    const pipeline: any[] = [
+      { $match: match },
+      {
+        $group: {
+          _id: { $dateToString: { format: dateFormat, date: '$createdAt' } },
+          totalSales: { $sum: '$amount' },
+          totalCommission: { $sum: '$commissionAmount' },
+          count: { $sum: 1 },
+        },
+      },
+      { $sort: { _id: 1 } },
+    ];
+
+    const rows = await this.purchaseModel.aggregate(pipeline);
+    return rows.map((r: any) => ({ period: r._id, totalSales: r.totalSales || 0, totalCommission: r.totalCommission || 0, count: r.count || 0 }));
+  }
+
   async getMyShop(userId: string) {
     return this.shopkeeperModel.findOne({ userId: new Types.ObjectId(userId) });
   }

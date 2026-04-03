@@ -148,6 +148,7 @@
       }
     },
     { "name": "Cashback - My Purchases", "method": "GET", "url": "/cashback/purchases/my", "authRequired": true, "role": "customer", "query": { "limit?": "number" } },
+    { "name": "Cashback - Shopkeeper Sales Overview", "method": "GET", "url": "/cashback/shopkeeper/sales-overview", "authRequired": true, "role": "shopkeeper", "query": { "range?": "daily|monthly|yearly", "start?": "YYYY-MM-DD", "end?": "YYYY-MM-DD" }, "description": "Aggregated sales for graphing: returns array of {period, totalSales, totalCommission, count}" },
     { "name": "Cashback - Shop Purchases", "method": "GET", "url": "/cashback/purchases/shop/:shopkeeperId", "authRequired": true, "role": "shopkeeper|admin", "params": { "shopkeeperId": "string" } },
     { "name": "Cashback - Shopkeeper Purchases", "method": "GET", "url": "/cashback/purchases/shopkeeper/:shopkeeperId", "authRequired": true, "role": "shopkeeper", "params": { "shopkeeperId": "string" } },
     { "name": "Cashback - Join", "method": "POST", "url": "/cashback/join", "authRequired": true, "role": "customer" },

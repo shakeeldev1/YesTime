@@ -65,6 +65,17 @@ export class CashbackController {
     return this.cashbackService.getMyShop(req.user.userId);
   }
 
+  @UseGuards(JwtAuthGuard)
+  @Get('shopkeeper/sales-overview')
+  async getShopkeeperSalesOverview(
+    @Request() req,
+    @Query('range') range?: string,
+    @Query('start') start?: string,
+    @Query('end') end?: string,
+  ) {
+    return this.cashbackService.getShopkeeperSalesOverview(req.user.userId, range || 'daily', start, end);
+  }
+
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('admin')
   @Get('shopkeeper/all')
