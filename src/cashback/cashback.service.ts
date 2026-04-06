@@ -607,15 +607,30 @@ export class CashbackService {
       ],
     });
 
+    const lastDraw = await this.drawModel.findOne().sort({ drawNumber: -1 }).exec();
+    const drawNumber = lastDraw ? lastDraw.drawNumber + 1 : 1;
+
+    // Generate winning number regardless of participants
+    const winningNumber = this.generateWinningNumber();
+
+    // If no participants, still create a draw record with the winning number (just no winner)
     if (eligibleCycles.length === 0) {
+      const draw = new this.drawModel({
+        drawNumber,
+        winningNumber,
+        winnerUserId: null,
+        winnerCoupon: null,
+        prizeAmount: 0,
+        totalParticipants: 0,
+        drawDate: new Date(),
+        status: 'completed',
+      });
+      await draw.save();
+
       return { message: 'No participants for the draw', draw: null };
     }
 
-    const winningNumber = this.generateWinningNumber();
     const winner = eligibleCycles.find((c) => c.couponNumber === winningNumber);
-
-    const lastDraw = await this.drawModel.findOne().sort({ drawNumber: -1 });
-    const drawNumber = lastDraw ? lastDraw.drawNumber + 1 : 1;
 
     let prizeAmount = 0;
     let winnerUserId: string | undefined;

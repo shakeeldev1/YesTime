@@ -6,13 +6,13 @@ export class CashbackDraw extends Document {
   @Prop({ required: true })
   drawNumber!: number;
 
-  @Prop({ required: true })
-  winningNumber!: string;
+  @Prop({ default: null })
+  winningNumber?: string;
 
-  @Prop()
+  @Prop({ default: null })
   winnerUserId?: string;
 
-  @Prop()
+  @Prop({ default: null })
   winnerCoupon?: string;
 
   @Prop({ default: 0 })
