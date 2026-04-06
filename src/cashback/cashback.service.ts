@@ -82,6 +82,10 @@ export class CashbackService {
         existing.address = dto.address;
         existing.status = 'pending';
         await existing.save();
+        
+        // Update user's shopkeeper status to pending
+        await this.usersService.updateProfile(userId, { shopkeeperStatus: 'pending' } as any);
+        
         return { message: 'Shopkeeper request re-submitted for approval', shopkeeper: existing };
       }
       throw new BadRequestException('Shopkeeper request already exists');
@@ -98,6 +102,9 @@ export class CashbackService {
       couponNumber: this.generateCoupon(),
     });
     await shopkeeper.save();
+
+    // Update user's shopkeeper status to pending
+    await this.usersService.updateProfile(userId, { shopkeeperStatus: 'pending' } as any);
 
     await this.createNotification(
       userId,
@@ -135,8 +142,9 @@ export class CashbackService {
     });
     await shopkeeper.save();
 
-    // Also update role
+    // Also update role and shopkeeper status
     await this.usersService.updateRole(userId, 'shopkeeper');
+    await this.usersService.updateProfile(userId, { shopkeeperStatus: 'approved' } as any);
 
     await this.createNotification(
       userId,

@@ -111,7 +111,9 @@
         { "name": "ownerName", "type": "string" },
         { "name": "phone", "type": "string" }
       ],
-      "optionalFields": [ { "name": "address", "type": "string" } ]
+      "optionalFields": [ { "name": "address", "type": "string" } ],
+      "description": "Submit a request to become a shopkeeper. This updates the user's shopkeeperStatus to 'pending' and awaits admin approval.",
+      "responseNotes": "On success: shopkeeperStatus will be 'pending', user role remains 'user' until admin approves. After admin approval, role becomes 'shopkeeper' and status becomes 'approved'. If you try to submit another request when one already exists, it will return 'Shopkeeper request already exists' error."
     },
     {
       "name": "Cashback - Register Shopkeeper (legacy)",
@@ -156,7 +158,7 @@
     { "name": "Cashback - My Cycles", "method": "GET", "url": "/cashback/my-cycles", "authRequired": true, "role": "customer" },
     { "name": "Cashback - Commitment Table", "method": "GET", "url": "/cashback/commitment-table", "authRequired": true, "role": "customer" },
     { "name": "Cashback - Draw History", "method": "GET", "url": "/cashback/draw/history", "authRequired": false, "role": "public" },
-    { "name": "Cashback - Next Draw", "method": "GET", "url": "/cashback/draw/next", "authRequired": false, "role": "public" },
+    { "name": "Cashback - Next Draw", "method": "GET", "url": "/cashback/draw/next", "authRequired": false, "role": "public", "description": "Get information about the next upcoming cashback draw", "responseNotes": "serverTime: Current server time. nextDrawTime: Scheduled time for the next draw. countdown: Seconds until next draw. drawNumber: Sequence number of the next draw. totalParticipants: Number of eligible participants (only counts active cycles at level >= 1 + permanent completed cycles). lastDraw: Details of the most recently completed draw, or null if no draws have been executed yet. Note: If totalParticipants is 0, the draw will execute but will have no winner." },
     { "name": "Cashback - Winning History", "method": "GET", "url": "/cashback/draw/winning-history", "authRequired": true, "role": "customer" },
     { "name": "Cashback - Dashboard Stats", "method": "GET", "url": "/cashback/dashboard-stats", "authRequired": true, "role": "user" },
     { "name": "Cashback - Notifications", "method": "GET", "url": "/cashback/notifications", "authRequired": true, "role": "user", "query": { "limit?": "number" } },
