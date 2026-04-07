@@ -28,11 +28,19 @@ export class CashbackController {
     return this.cashbackService.requestShopkeeper(req.user.userId, dto);
   }
 
-  /** Legacy: Direct register (pays fee immediately) */
-  @UseGuards(JwtAuthGuard)
-  @Post('shopkeeper/register')
-  async registerShopkeeper(@Request() req, @Body() dto: RegisterShopkeeperDto) {
-    return this.cashbackService.registerShopkeeper(req.user.userId, dto);
+  /** 
+   * ADMIN ONLY: Direct register shopkeeper (for migrations/admin actions)
+   * DEPRECATED: Use the normal approval workflow (request + approve) instead
+   */
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('admin')
+  @Post('shopkeeper/register-admin/:userId')
+  async registerShopkeeperAdmin(
+    @Request() req,
+    @Param('userId') userId: string,
+    @Body() dto: RegisterShopkeeperDto,
+  ) {
+    return this.cashbackService.registerShopkeeperAdmin(req.user.userId, userId, dto);
   }
 
   /** Admin: Approve pending shopkeeper */

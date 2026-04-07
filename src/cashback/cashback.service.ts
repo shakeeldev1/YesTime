@@ -82,15 +82,12 @@ export class CashbackService {
       }
       
       // Reapply after rejection: Check balance and deduct fee
-      await this.ensureRegistrationFeeBalance(userId);
-      await this.walletService.debit(userId, this.REGISTRATION_FEE);
-      
       existing.shopName = dto.shopName;
       existing.ownerName = dto.ownerName;
       existing.phone = dto.phone;
       existing.address = dto.address;
       existing.status = 'pending';
-      existing.isRegistrationPaid = true; // Fee paid
+      existing.isRegistrationPaid = false; // Fee NOT yet paid - charged upon approval
       await existing.save();
       
       // Update user's shopkeeper status to pending
@@ -99,17 +96,14 @@ export class CashbackService {
       await this.createNotification(
         userId,
         'Request Re-submitted',
-        `Your shopkeeper request for "${dto.shopName}" has been re-submitted. PKR ${this.REGISTRATION_FEE} registration fee has been charged. Waiting for admin approval.`,
+        `Your shopkeeper request for \"${dto.shopName}\" has been re-submitted. Waiting for admin review. Fee will be charged upon approval.`,
         'SYSTEM',
       );
       
-      return { message: 'Shopkeeper request re-submitted. Registration fee PKR ' + this.REGISTRATION_FEE + ' has been charged.', shopkeeper: existing };
+      return { message: 'Shopkeeper request re-submitted. Status: Awaiting admin approval. Fee will be charged upon approval.', shopkeeper: existing };
     }
 
-    // Check balance and deduct fee before creating request
-    await this.ensureRegistrationFeeBalance(userId);
-    await this.walletService.debit(userId, this.REGISTRATION_FEE);
-
+    // Create pending request WITHOUT charging fee yet
     const shopkeeper = new this.shopkeeperModel({
       userId: new Types.ObjectId(userId),
       shopName: dto.shopName,
@@ -117,7 +111,7 @@ export class CashbackService {
       phone: dto.phone,
       address: dto.address,
       status: 'pending',
-      isRegistrationPaid: true, // Fee paid upfront
+      isRegistrationPaid: false, // Fee NOT yet paid - charged upon approval
       couponNumber: this.generateCoupon(),
     });
     await shopkeeper.save();
@@ -128,25 +122,33 @@ export class CashbackService {
     await this.createNotification(
       userId,
       'Request Submitted',
-      `Your shopkeeper request for "${dto.shopName}" has been submitted. PKR ${this.REGISTRATION_FEE} registration fee has been charged. Waiting for admin approval.`,
+      `Your shopkeeper request for \"${dto.shopName}\" has been submitted. Waiting for admin review. Fee will be charged upon approval.`,
       'SYSTEM',
     );
 
-    return { message: 'Shopkeeper request submitted for admin approval. Registration fee PKR ' + this.REGISTRATION_FEE + ' has been charged.', shopkeeper };
+    return { message: 'Shopkeeper request submitted. Status: Awaiting admin approval. Fee will be charged upon approval.', shopkeeper };
   }
 
-  /** Legacy: Direct register (pays fee immediately, sets active) */
-  async registerShopkeeper(userId: string, dto: RegisterShopkeeperDto) {
+  /** 
+   * ADMIN ONLY: Direct register shopkeeper (for admin migrations/imports)
+   * This is deprecated - use the approval workflow instead
+   */
+  async registerShopkeeperAdmin(adminId: string, userId: string, dto: RegisterShopkeeperDto) {
+    // Note: adminId verification should be done at controller level via RolesGuard
     const existing = await this.shopkeeperModel.findOne({ userId: new Types.ObjectId(userId) });
     if (existing) {
-      throw new BadRequestException('Shopkeeper already registered');
+      throw new BadRequestException('Shopkeeper already exists. Status: ' + existing.status);
     }
+
+    const user = await this.usersService.findById(userId);
+    if (!user) throw new BadRequestException('User not found');
 
     const balance = await this.walletService.getBalance(userId);
     if (balance < this.REGISTRATION_FEE) {
       throw new BadRequestException(`Insufficient wallet balance. Registration fee is PKR ${this.REGISTRATION_FEE}`);
     }
 
+    // Charge fee for admin-registered shopkeeper
     await this.walletService.debit(userId, this.REGISTRATION_FEE);
 
     const shopkeeper = new this.shopkeeperModel({
@@ -161,18 +163,26 @@ export class CashbackService {
     });
     await shopkeeper.save();
 
-    // Also update role and shopkeeper status
+    // Update user role and status
     await this.usersService.updateRole(userId, 'shopkeeper');
     await this.usersService.updateProfile(userId, { shopkeeperStatus: 'approved' } as any);
 
     await this.createNotification(
       userId,
-      'Shop Registered!',
-      `Your shop "${dto.shopName}" has been registered. PKR ${this.REGISTRATION_FEE} registration fee deducted from wallet.`,
+      'Shop Registered by Admin',
+      `Your shop "${dto.shopName}" has been registered. PKR ${this.REGISTRATION_FEE} registration fee deducted.`,
       'SYSTEM',
     );
 
-    return { message: 'Shopkeeper registered successfully', shopkeeper };
+    return { message: 'Shopkeeper registered successfully by admin', shopkeeper };
+  }
+
+  /** 
+   * DEPRECATED: Use requestShopkeeper + approveShopkeeper workflow instead
+   * This method is kept for backwards compatibility but should not be exposed in API
+   */
+  async registerShopkeeper(userId: string, dto: RegisterShopkeeperDto) {
+    throw new BadRequestException('This endpoint has been deprecated. Use /cashback/shopkeeper/request instead.');
   }
 
   /** Admin approves pending shopkeeper request - Fee should already be paid by user */
@@ -185,30 +195,27 @@ export class CashbackService {
 
     const userId = shopkeeper.userId.toString();
 
-    // Check if fee was paid during request. If not, charge it now.
-    if (!shopkeeper.isRegistrationPaid) {
-      const balance = await this.walletService.getBalance(userId);
-      if (balance < this.REGISTRATION_FEE) {
-        throw new BadRequestException(
-          `Cannot approve: Insufficient wallet balance. Registration fee PKR ${this.REGISTRATION_FEE} required. Current balance: PKR ${balance}`,
-        );
-      }
-      await this.walletService.debit(userId, this.REGISTRATION_FEE);
+    // CHARGE FEE UPON APPROVAL - not before
+    const balance = await this.walletService.getBalance(userId);
+    if (balance < this.REGISTRATION_FEE) {
+      throw new BadRequestException(
+        `Cannot approve: User wallet insufficient. Need PKR ${this.REGISTRATION_FEE}. Current: PKR ${balance}. User must top up wallet first.`,
+      );
     }
+    await this.walletService.debit(userId, this.REGISTRATION_FEE);
 
     shopkeeper.status = 'active';
-    shopkeeper.isRegistrationPaid = true; // Mark fee as paid
+    shopkeeper.isRegistrationPaid = true; // Mark fee as paid upon approval
     await shopkeeper.save();
 
     // Ensure user role is set to shopkeeper upon approval
     await this.usersService.updateRole(userId, 'shopkeeper');
     await this.usersService.updateProfile(userId, { shopkeeperStatus: 'approved' } as any);
 
-    const feeMessage = shopkeeper.isRegistrationPaid ? 'Registration fee has been processed.' : '';
     await this.createNotification(
       userId,
       '🎉 Request Approved!',
-      `Your shopkeeper request has been approved! You can now start selling. ${feeMessage}`,
+      `Your shopkeeper request has been approved! You can now start selling. Registration fee PKR ${this.REGISTRATION_FEE} has been deducted from your wallet.`,
       'SYSTEM',
     );
 
@@ -218,7 +225,7 @@ export class CashbackService {
       await this.mailerService.sendShopkeeperApprovalEmail(user.email, user.name, shopkeeper.shopName);
     }
 
-    return { message: 'Shopkeeper approved successfully. Registration fee processed.', shopkeeper };
+    return { message: 'Shopkeeper approved successfully. Registration fee PKR ' + this.REGISTRATION_FEE + ' deducted.', shopkeeper };
   }
 
   /** Admin rejects pending shopkeeper request */
