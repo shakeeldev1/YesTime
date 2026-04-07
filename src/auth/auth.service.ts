@@ -194,18 +194,18 @@ export class AuthService {
                 throw new BadRequestException('Shop name, location and type are required for shopkeeper registration');
             }
 
-            // Set role immediately to shopkeeper and keep status pending until admin approval.
-            await this.userService.updateRole(userId, 'shopkeeper');
-
+            // IMPORTANT: Keep role as 'user' until admin approves. Set shopkeeperStatus to 'pending'.
+            // This ensures clear separation between role (actual capabilies) and status (approval stage).
             const updatedUser = await this.userService.updateProfile(userId, {
                 shopName: dto.shopName,
                 shopLocation: dto.shopLocation,
                 shopType: dto.shopType,
                 shopDescription: dto.shopDescription,
-                shopkeeperStatus: 'pending',
+                shopkeeperStatus: 'pending', // Mark as pending approval
             } as any);
 
             // Create or refresh cashback shopkeeper request so admin can approve from pending list.
+            // This will charge the registration fee upfront.
             const existingShop = await this.cashbackService.getMyShop(userId);
             if (!existingShop || existingShop.status === 'rejected') {
                 await this.cashbackService.requestShopkeeper(userId, {
@@ -223,8 +223,8 @@ export class AuthService {
             }
 
             return { 
-                message: 'Shopkeeper application submitted. Admin will review your request.', 
-                role: 'shopkeeper',
+                message: 'Shopkeeper application submitted. Registration fee charged. Admin will review your request.', 
+                role: 'user',
                 shopkeeperStatus: 'pending',
                 user: {
                     id: updatedUser?._id,
@@ -232,7 +232,7 @@ export class AuthService {
                     email: updatedUser?.email,
                     phone: updatedUser?.phone,
                     isPhoneVerified: updatedUser?.isPhoneVerified,
-                    role: 'shopkeeper',
+                    role: 'user', // Role stays 'user' until approved
                     shopkeeperStatus: 'pending',
                 }
             };
