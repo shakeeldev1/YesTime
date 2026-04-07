@@ -112,10 +112,10 @@
         { "name": "phone", "type": "string" }
       ],
       "optionalFields": [ { "name": "address", "type": "string" } ],
-      "description": "Submit a request to become a shopkeeper. NO FEE CHARGED YET. Registration fee PKR 1500 will be charged AFTER admin approval.",
-      "businessLogic": "STEP 1 (User Request): (1) Shopkeeper record created with status='pending', isRegistrationPaid=false. (2) User.role stays 'user', shopkeeperStatus='pending'. (3) NO FEE DEDUCTED YET. (4) Request sent to admin dashboard. STEP 2 (Admin Approval): (1) Admin reviews request. (2) Admin checks user wallet balance (need PKR 1500). (3) Fee deducted from wallet upon approval. (4) Shopkeeper status→'active', isRegistrationPaid=true. (5) User.role→'shopkeeper', shopkeeperStatus→'approved'. (6) User can now record purchases. If Rejected: User can reapply, no fee lost.",
-      "responseNotes": "NO FEE DEDUCTED. shopkeeperStatus='pending'. isRegistrationPaid=false. User.role remains 'user'. Message: 'Awaiting admin approval. Fee will be charged upon approval.' After admin approval: status='active', isRegistrationPaid=true, User.role='shopkeeper'. If rejected: can reapply (still no fee lost).",
-      "errors": { "Already has request": "Status is 'pending' or 'active'. Contact admin.", "Commission error": "If issues with later purchase recording" }
+      "description": "Submit a request to become a shopkeeper. Registration fee PKR 1500 is CHARGED IMMEDIATELY. If request is rejected, fee is REFUNDED.",
+      "businessLogic": "STAGE 1 (User Request): (1) Check wallet balance (need PKR 1500). (2) DEDUCT fee immediately - user is committed to request. (3) Shopkeeper record created: status='pending', isRegistrationPaid=true. (4) User.role stays 'user', shopkeeperStatus='pending'. (5) Request sent to admin dashboard. STAGE 2 (Admin Approval): (1) Admin reviews request. (2) Admin approves: Shopkeeper status→'active', User.role→'shopkeeper', shopkeeperStatus→'approved'. (3) User can now record purchases. If Rejected: Fee refunded to wallet, user can reapply (will be charged fee again for new request).",
+      "responseNotes": "Fee: PKR 1500 DEDUCTED immediately. shopkeeperStatus='pending'. isRegistrationPaid=true. User.role remains 'user'. Message: 'Fee charged. If rejected, fee will be refunded.' After admin approval: status='active', User.role='shopkeeper'. If rejected: PKR 1500 refunded.",
+      "errors": { "Insufficient wallet balance": "Need PKR 1500+. Use /wallet/add-balance to top up.", "Already has request": "Status is 'pending' or 'active'. Contact admin.", "Commission error": "If issues with later purchase recording" }
     },
     {
       "name": "Cashback - Approve Shopkeeper (Admin Only)",
@@ -124,24 +124,23 @@
       "authRequired": true,
       "role": "admin",
       "requiredParams": [ { "name": "id", "type": "string (MongoId)" } ],
-      "description": "Admin approves a pending shopkeeper request. Charges registration fee at this point.",
-      "businessLogic": "(1) Find shopkeeper with status='pending'. (2) Check user wallet balance (need PKR 1500). (3) Deduct fee from wallet. (4) Set shopkeeper.status='active', isRegistrationPaid=true. (5) Update user.role→'shopkeeper', shopkeeperStatus→'approved'. (6) Send approval notification to user.",
-      "responseNotes": "Fee: PKR 1500 deducted from user wallet. Shopkeeper status='active'. User role='shopkeeper'. User can now record purchases.",
-      "errors": { "Not in pending status": "Only pending requests can be approved.", "Insufficient wallet": "User must top up wallet to PKR 1500+ before approval can happen." }
+      "description": "Admin approves a pending shopkeeper request. Fee is already paid by user at request time.",
+      "businessLogic": "(1) Find shopkeeper with status='pending'. (2) Set shopkeeper.status='active'. (3) Update user.role→'shopkeeper', shopkeeperStatus→'approved'. (4) Send approval notification to user. (5) Fee is NOT charged here - already deducted at request time.",
+      "responseNotes": "Approval is quick since fee was already deducted. Shopkeeper status='active'. User role becomes 'shopkeeper'. User can now record purchases.",
+      "errors": { "Not in pending status": "Only pending requests can be approved." }
     },
     {
-      "name": "Cashback - Register Shopkeeper Admin (Admin Only - DEPRECATED)",
+      "name": "Cashback - Reject Shopkeeper (Admin Only)",
       "method": "POST",
-      "url": "/cashback/shopkeeper/register-admin/:userId",
+      "url": "/cashback/shopkeeper/:id/reject",
       "authRequired": true,
       "role": "admin",
-      "bodyDto": "server/src/cashback/dto/cashback.dto.ts",
-      "requiredParams": [ { "name": "userId", "type": "string (MongoId)" } ],
-      "requiredFields": ["shopName","ownerName","phone"],
-      "description": "DEPRECATED - For admin migrations only. Directly creates active shopkeeper, bypassing approval workflow. Do NOT use for normal registrations.",
-      "businessLogic": "(1) Admin only. (2) Wallet balance checked, fee deducted. (3) Shopkeeper: status='active', isRegistrationPaid=true. (4) User.role='shopkeeper' immediately. (5) No pending request stage. FOR MIGRATIONS ONLY.",
-      "responseNotes": "Fee deducted. Status='active'. User.role='shopkeeper' immediately. DO NOT USE FOR NORMAL REGISTRATIONS - use approval workflow.",
-      "warnings": "DEPRECATED - This endpoint bypasses the normal approval workflow. Should only be used for admin-initiated migrations or special cases."
+      "requiredParams": [ { "name": "id", "type": "string (MongoId)" } ],
+      "optionalFields": [ { "name": "reason", "type": "string" } ],
+      "description": "Admin rejects a pending shopkeeper request. Registration fee is REFUNDED to user wallet.",
+      "businessLogic": "(1) Find shopkeeper with status='pending'. (2) REFUND PKR 1500 fee back to user wallet (since they paid at request time). (3) Set shopkeeper.status='rejected'. (4) Send rejection notification with reason. (5) User can reapply later (will be charged fee again).",
+      "responseNotes": "Fee PKR 1500 refunded to user wallet. User can reapply without losing money. Message: 'Fee has been refunded.'",
+      "errors": { "Not in pending status": "Only pending requests can be rejected." }
     },
     { "name": "Cashback - My Shop", "method": "GET", "url": "/cashback/shopkeeper/my-shop", "authRequired": true, "role": "shopkeeper" },
     { "name": "Cashback - Get Shopkeeper By ID", "method": "GET", "url": "/cashback/shopkeeper/:id", "authRequired": true, "role": "user", "params": { "id": "string" } },

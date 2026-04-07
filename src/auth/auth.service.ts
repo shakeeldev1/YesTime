@@ -223,7 +223,7 @@ export class AuthService {
             }
 
             return { 
-                message: 'Shopkeeper application submitted. Admin will review your request. Registration fee will be charged upon approval.', 
+                message: 'Shopkeeper application submitted. Registration fee charged. Admin will review your request. If rejected, fee will be refunded.', 
                 role: 'user',
                 shopkeeperStatus: 'pending',
                 user: {

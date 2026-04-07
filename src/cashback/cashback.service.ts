@@ -82,12 +82,15 @@ export class CashbackService {
       }
       
       // Reapply after rejection: Check balance and deduct fee
+      await this.ensureRegistrationFeeBalance(userId);
+      await this.walletService.debit(userId, this.REGISTRATION_FEE);
+      
       existing.shopName = dto.shopName;
       existing.ownerName = dto.ownerName;
       existing.phone = dto.phone;
       existing.address = dto.address;
       existing.status = 'pending';
-      existing.isRegistrationPaid = false; // Fee NOT yet paid - charged upon approval
+      existing.isRegistrationPaid = true; // Fee PAID at request time
       await existing.save();
       
       // Update user's shopkeeper status to pending
@@ -96,14 +99,17 @@ export class CashbackService {
       await this.createNotification(
         userId,
         'Request Re-submitted',
-        `Your shopkeeper request for \"${dto.shopName}\" has been re-submitted. Waiting for admin review. Fee will be charged upon approval.`,
+        `Your shopkeeper request for \"${dto.shopName}\" has been re-submitted. Registration fee PKR ${this.REGISTRATION_FEE} has been deducted. Waiting for admin review. If rejected, fee will be refunded.`,
         'SYSTEM',
       );
       
-      return { message: 'Shopkeeper request re-submitted. Status: Awaiting admin approval. Fee will be charged upon approval.', shopkeeper: existing };
+      return { message: 'Shopkeeper request re-submitted. Registration fee PKR ' + this.REGISTRATION_FEE + ' has been charged. If rejected, fee will be refunded.', shopkeeper: existing };
     }
 
-    // Create pending request WITHOUT charging fee yet
+    // Check balance and deduct fee at request time
+    await this.ensureRegistrationFeeBalance(userId);
+    await this.walletService.debit(userId, this.REGISTRATION_FEE);
+
     const shopkeeper = new this.shopkeeperModel({
       userId: new Types.ObjectId(userId),
       shopName: dto.shopName,
@@ -111,7 +117,7 @@ export class CashbackService {
       phone: dto.phone,
       address: dto.address,
       status: 'pending',
-      isRegistrationPaid: false, // Fee NOT yet paid - charged upon approval
+      isRegistrationPaid: true, // Fee PAID at request time
       couponNumber: this.generateCoupon(),
     });
     await shopkeeper.save();
@@ -122,11 +128,11 @@ export class CashbackService {
     await this.createNotification(
       userId,
       'Request Submitted',
-      `Your shopkeeper request for \"${dto.shopName}\" has been submitted. Waiting for admin review. Fee will be charged upon approval.`,
+      `Your shopkeeper request for \"${dto.shopName}\" has been submitted. Registration fee PKR ${this.REGISTRATION_FEE} has been deducted. Waiting for admin review. If rejected, your fee will be refunded.`,
       'SYSTEM',
     );
 
-    return { message: 'Shopkeeper request submitted. Status: Awaiting admin approval. Fee will be charged upon approval.', shopkeeper };
+    return { message: 'Shopkeeper request submitted. Registration fee PKR ' + this.REGISTRATION_FEE + ' has been charged. If rejected, fee will be refunded.', shopkeeper };
   }
 
   /** 
@@ -195,17 +201,8 @@ export class CashbackService {
 
     const userId = shopkeeper.userId.toString();
 
-    // CHARGE FEE UPON APPROVAL - not before
-    const balance = await this.walletService.getBalance(userId);
-    if (balance < this.REGISTRATION_FEE) {
-      throw new BadRequestException(
-        `Cannot approve: User wallet insufficient. Need PKR ${this.REGISTRATION_FEE}. Current: PKR ${balance}. User must top up wallet first.`,
-      );
-    }
-    await this.walletService.debit(userId, this.REGISTRATION_FEE);
-
+    // Fee already paid at request time, so just activate
     shopkeeper.status = 'active';
-    shopkeeper.isRegistrationPaid = true; // Mark fee as paid upon approval
     await shopkeeper.save();
 
     // Ensure user role is set to shopkeeper upon approval
@@ -215,7 +212,7 @@ export class CashbackService {
     await this.createNotification(
       userId,
       '🎉 Request Approved!',
-      `Your shopkeeper request has been approved! You can now start selling. Registration fee PKR ${this.REGISTRATION_FEE} has been deducted from your wallet.`,
+      `Your shopkeeper request has been approved! You can now start selling. Your registration fee has been locked in.`,
       'SYSTEM',
     );
 
@@ -225,7 +222,7 @@ export class CashbackService {
       await this.mailerService.sendShopkeeperApprovalEmail(user.email, user.name, shopkeeper.shopName);
     }
 
-    return { message: 'Shopkeeper approved successfully. Registration fee PKR ' + this.REGISTRATION_FEE + ' deducted.', shopkeeper };
+    return { message: 'Shopkeeper approved successfully. You can now record purchases.', shopkeeper };
   }
 
   /** Admin rejects pending shopkeeper request */
@@ -236,24 +233,31 @@ export class CashbackService {
       throw new BadRequestException('Shopkeeper is not in pending status');
     }
 
+    const userId = shopkeeper.userId.toString();
+
+    // Refund the registration fee since request is rejected
+    if (shopkeeper.isRegistrationPaid) {
+      await this.walletService.credit(userId, this.REGISTRATION_FEE);
+    }
+
     shopkeeper.status = 'rejected';
     await shopkeeper.save();
 
     await this.createNotification(
-      shopkeeper.userId.toString(),
+      userId,
       'Request Rejected',
-      reason || 'Your shopkeeper request has been rejected by admin.',
+      `${reason || 'Your shopkeeper request has been rejected by admin.'} Your registration fee PKR ${this.REGISTRATION_FEE} has been refunded to your wallet.`,
       'SYSTEM',
     );
 
     // Send email notification
-    const user = await this.usersService.findById(shopkeeper.userId.toString());
+    const user = await this.usersService.findById(userId);
     if (user) {
       await this.mailerService.sendShopkeeperRejectionEmail(user.email, user.name, shopkeeper.shopName, reason);
-      await this.usersService.updateProfile(shopkeeper.userId.toString(), { shopkeeperStatus: 'rejected' } as any);
+      await this.usersService.updateProfile(userId, { shopkeeperStatus: 'rejected' } as any);
     }
 
-    return { message: 'Shopkeeper rejected', shopkeeper };
+    return { message: 'Shopkeeper request rejected. Fee PKR ' + this.REGISTRATION_FEE + ' has been refunded.', shopkeeper };
   }
 
   /** Get pending shopkeeper requests */
