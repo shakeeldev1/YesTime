@@ -108,7 +108,7 @@ export class CashbackController {
   @UseGuards(JwtAuthGuard)
   @Post('purchase')
   async recordPurchase(@Request() req, @Body() dto: RecordPurchaseDto) {
-    return this.cashbackService.recordPurchase(req.user.userId, dto);
+    return this.cashbackService.recordPurchase(req.user.userId, dto, req.user.role);
   }
 
   @UseGuards(JwtAuthGuard)

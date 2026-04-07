@@ -112,8 +112,10 @@
         { "name": "phone", "type": "string" }
       ],
       "optionalFields": [ { "name": "address", "type": "string" } ],
-      "description": "Submit a request to become a shopkeeper. This updates the user's shopkeeperStatus to 'pending' and awaits admin approval.",
-      "responseNotes": "On success: shopkeeperStatus will be 'pending', user role remains 'user' until admin approves. After admin approval, role becomes 'shopkeeper' and status becomes 'approved'. If you try to submit another request when one already exists, it will return 'Shopkeeper request already exists' error."
+      "description": "Submit a request to become a shopkeeper. Registration fee PKR 1500 is charged upfront from wallet.",
+      "businessLogic": "(1) Wallet balance checked (need PKR 1500). (2) Fee deducted immediately. (3) Shopkeeper record created: status='pending', isRegistrationPaid=true. (4) User.role stays 'user'. (5) Admin approves: role→'shopkeeper', status→'active'. (6) If rejected: can reapply (charges fee again).",
+      "responseNotes": "Fee: PKR 1500 deducted. shopkeeperStatus='pending'. isRegistrationPaid=true. User.role remains 'user' until admin approval. After admin approval: role='shopkeeper', status='active', shopkeeperStatus='approved'. Rejection allows reapplication with new fee charge.",
+      "errors": { "Insufficient wallet balance": "Need PKR 1500+. Use /wallet/add-balance to top up.", "already approved/pending": "Contact admin to modify. Cannot have multiple requests.", "Commission error": "If issues with purchase recording" }
     },
     {
       "name": "Cashback - Register Shopkeeper (legacy)",
@@ -122,7 +124,10 @@
       "authRequired": true,
       "role": "user",
       "bodyDto": "server/src/cashback/dto/cashback.dto.ts",
-      "requiredFields": ["shopName","ownerName","phone"]
+      "requiredFields": ["shopName","ownerName","phone"],
+      "description": "Direct registration (no admin approval). Fee PKR 1500 charged upfront. Status becomes 'active' immediately.",
+      "businessLogic": "(1) Wallet balance checked/deducted. (2) Shopkeeper: status='active', isRegistrationPaid=true. (3) User.role='shopkeeper' immediately. (4) Ready to record purchases.",
+      "responseNotes": "Fee deducted. Status='active'. User.role='shopkeeper' immediately (no approval). Ready to use."
     },
     { "name": "Cashback - My Shop", "method": "GET", "url": "/cashback/shopkeeper/my-shop", "authRequired": true, "role": "shopkeeper" },
     { "name": "Cashback - Get Shopkeeper By ID", "method": "GET", "url": "/cashback/shopkeeper/:id", "authRequired": true, "role": "user", "params": { "id": "string" } },
@@ -138,14 +143,16 @@
         { "name": "amount", "type": "number (>=1)" }
       ],
       "optionalFields": [
-        { "name": "shopkeeperId", "type": "string (MongoId) — optional; server will use logged-in shopkeeper if omitted" },
+        { "name": "shopkeeperId", "type": "string (MongoId) — optional" },
         { "name": "description", "type": "string" }
       ],
+      "description": "Record a customer purchase. Requires user.role='shopkeeper' AND shopkeeper.status='active'.",
+      "businessLogic": "(1) Verify user.role='shopkeeper'. (2) Find shopkeeper: status='active' required. (3) Find customer cycle by coupon (active/completed/won). (4) Commission (2.5%) deducted from shopkeeper wallet. (5) Full amount added to customer cycle. (6) At level 30: cycle becomes permanent.",
       "example": {
         "body": {
           "customerCoupon": "123456",
           "amount": 500,
-          "description": "Grocery purchase"
+          "description": "Grocery"
         }
       }
     },

@@ -73,32 +73,37 @@ export class CashbackService {
   async requestShopkeeper(userId: string, dto: RegisterShopkeeperDto) {
     const existing = await this.shopkeeperModel.findOne({ userId: new Types.ObjectId(userId) });
     if (existing) {
-      if (existing.status === 'rejected') {
-        // Allow re-applying: Check balance and deduct fee
-        await this.ensureRegistrationFeeBalance(userId);
-        await this.walletService.debit(userId, this.REGISTRATION_FEE);
-        
-        existing.shopName = dto.shopName;
-        existing.ownerName = dto.ownerName;
-        existing.phone = dto.phone;
-        existing.address = dto.address;
-        existing.status = 'pending';
-        existing.isRegistrationPaid = true; // Fee paid
-        await existing.save();
-        
-        // Update user's shopkeeper status to pending
-        await this.usersService.updateProfile(userId, { shopkeeperStatus: 'pending' } as any);
-        
-        await this.createNotification(
-          userId,
-          'Request Re-submitted',
-          `Your shopkeeper request for "${dto.shopName}" has been re-submitted. PKR ${this.REGISTRATION_FEE} registration fee has been charged. Waiting for admin approval.`,
-          'SYSTEM',
+      // Allow reapplication only if previous was rejected
+      if (existing.status !== 'rejected') {
+        const statusString = existing.status === 'active' ? 'already approved' : 'already ' + existing.status;
+        throw new BadRequestException(
+          `You have a shopkeeper request that is ${statusString}. Status: ${existing.status}. Please contact admin to modify.`,
         );
-        
-        return { message: 'Shopkeeper request re-submitted. Registration fee PKR ' + this.REGISTRATION_FEE + ' has been charged.', shopkeeper: existing };
       }
-      throw new BadRequestException('Shopkeeper request already exists (status: ' + existing.status + ')');
+      
+      // Reapply after rejection: Check balance and deduct fee
+      await this.ensureRegistrationFeeBalance(userId);
+      await this.walletService.debit(userId, this.REGISTRATION_FEE);
+      
+      existing.shopName = dto.shopName;
+      existing.ownerName = dto.ownerName;
+      existing.phone = dto.phone;
+      existing.address = dto.address;
+      existing.status = 'pending';
+      existing.isRegistrationPaid = true; // Fee paid
+      await existing.save();
+      
+      // Update user's shopkeeper status to pending
+      await this.usersService.updateProfile(userId, { shopkeeperStatus: 'pending' } as any);
+      
+      await this.createNotification(
+        userId,
+        'Request Re-submitted',
+        `Your shopkeeper request for "${dto.shopName}" has been re-submitted. PKR ${this.REGISTRATION_FEE} registration fee has been charged. Waiting for admin approval.`,
+        'SYSTEM',
+      );
+      
+      return { message: 'Shopkeeper request re-submitted. Registration fee PKR ' + this.REGISTRATION_FEE + ' has been charged.', shopkeeper: existing };
     }
 
     // Check balance and deduct fee before creating request
@@ -377,7 +382,12 @@ export class CashbackService {
 
   // ========== PURCHASE / SHOPPING ==========
 
-  async recordPurchase(shopkeeperUserId: string, dto: RecordPurchaseDto) {
+  async recordPurchase(shopkeeperUserId: string, dto: RecordPurchaseDto, userRole: string = 'user') {
+    // Verify caller is a shopkeeper
+    if (userRole !== 'shopkeeper') {
+      throw new BadRequestException('Only shopkeepers can record purchases. Your role is: ' + userRole);
+    }
+
     // Resolve shopkeeper: prefer provided shopkeeperId, otherwise use logged-in user's shop
     let shopkeeper: Shopkeeper | null = null;
     if (dto.shopkeeperId) {
@@ -391,15 +401,19 @@ export class CashbackService {
     }
 
     if (shopkeeper.status !== 'active') {
-      throw new BadRequestException('Your shopkeeper account is pending admin approval. You cannot record sales yet.');
+      throw new BadRequestException(
+        `Your shopkeeper account is in ${shopkeeper.status} status. You cannot record sales until approved by admin.`,
+      );
     }
 
-    if (shopkeeper.userId.toString() !== shopkeeperUserId) {
-      throw new BadRequestException('You can only record purchases for your own shop');
+    // Ensure the shopkeeper belongs to the logged-in user (unless admin is using shopkeeperId param)
+    if (!dto.shopkeeperId && shopkeeper.userId.toString() !== shopkeeperUserId) {
+      throw new BadRequestException('Mismatched shopkeeper. You can only record purchases for your own shop.');
     }
 
     // Find the customer cycle by coupon
-    const cycle = await this.cycleModel.findOne({ couponNumber: dto.customerCoupon, status: { $in: ['active', 'completed'] } });
+    // Include 'active', 'completed', and 'won' cycles to allow purchases for won customers
+    const cycle = await this.cycleModel.findOne({ couponNumber: dto.customerCoupon, status: { $in: ['active', 'completed', 'won'] } });
     if (!cycle) {
       throw new NotFoundException('Customer coupon not found or not active');
     }
@@ -447,12 +461,9 @@ export class CashbackService {
       await this.createNotification(
         cycle.customerId.toString(),
         '🎊 30-Level Cycle Complete!',
-        `Your coupon ${cycle.couponNumber} is now permanently in the draw! You've been assigned a new coupon.`,
+        `Your coupon ${cycle.couponNumber} is now permanently in the draw! Keep shopping - you could win anytime!`,
         'SYSTEM',
       );
-
-      // Create a new cycle for the customer
-      await this.createNewCycle(cycle.customerId.toString());
     }
 
     await cycle.save();
@@ -478,11 +489,15 @@ export class CashbackService {
   // ========== CUSTOMER CYCLE ==========
 
   async joinCashback(userId: string) {
-    const existing = await this.cycleModel.findOne({ customerId: new Types.ObjectId(userId), status: 'active' });
-    if (existing) {
-      throw new BadRequestException('You already have an active cashback cycle');
+    const existingActive = await this.cycleModel.findOne({ customerId: new Types.ObjectId(userId), status: 'active' });
+    if (existingActive) {
+      throw new BadRequestException(
+        'You already have an active cashback cycle with coupon: ' + existingActive.couponNumber,
+      );
     }
 
+    // If customer won before, they may have a 'won' cycle. Still allow them to join a new active cycle.
+    // The old won cycle will remain in the draw pool.
     return this.createNewCycle(userId);
   }
 
@@ -621,11 +636,13 @@ export class CashbackService {
   // ========== LUCKY DRAW ==========
 
   async executeLuckyDraw() {
-    // Get all eligible coupons (active cycles at level >= 1 + permanent completed cycles)
+    // Get all eligible coupons: active cycles at level >= 1, permanent completed cycles, and won cycles
+    // Won cycles should still participate until customer explicitly joins a new cycle
     const eligibleCycles = await this.cycleModel.find({
       $or: [
         { status: 'active', currentLevel: { $gte: 1 } },
         { status: 'completed', isPermanent: true },
+        { status: 'won' }, // Won customers still participate until they join new cycle
       ],
     });
 
@@ -667,11 +684,14 @@ export class CashbackService {
       // Credit the prize to the winner's main wallet
       await this.walletService.credit(winnerUserId, prizeAmount);
 
-      // Reset the cycle - customer starts from 0
+      // Mark the cycle as won (customer can still participate with this coupon until they join new cycle)
       winner.status = 'won';
       winner.wonDate = new Date();
       winner.wonAmount = prizeAmount;
       await winner.save();
+
+      // Create a new active cycle for the customer so they can continue shopping
+      await this.createNewCycle(winnerUserId);
 
       // Notify winner
       await this.createNotification(
@@ -729,6 +749,7 @@ export class CashbackService {
       $or: [
         { status: 'active', currentLevel: { $gte: 1 } },
         { status: 'completed', isPermanent: true },
+        { status: 'won' }, // Include won customers
       ],
     });
 
