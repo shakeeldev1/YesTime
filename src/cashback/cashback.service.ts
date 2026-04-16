@@ -58,14 +58,16 @@ export class CashbackService {
     return { level, committed, remaining: totalShopping - committed };
   }
 
-  private async ensureRegistrationFeeBalance(userId: string) {
-    const balance = await this.walletService.getBalance(userId);
-    if (balance < this.REGISTRATION_FEE) {
-      throw new BadRequestException(
-        `Insufficient wallet balance. You need PKR ${this.REGISTRATION_FEE} to submit shopkeeper request. Current balance: PKR ${balance}`,
-      );
-    }
-  }
+  // DEPRECATED: No longer used - payment method not implemented yet
+  // Will be re-enabled when payment gateway is added
+  // private async ensureRegistrationFeeBalance(userId: string) {
+  //   const balance = await this.walletService.getBalance(userId);
+  //   if (balance < this.REGISTRATION_FEE) {
+  //     throw new BadRequestException(
+  //       `Insufficient wallet balance. You need PKR ${this.REGISTRATION_FEE} to submit shopkeeper request. Current balance: PKR ${balance}`,
+  //     );
+  //   }
+  // }
 
   // ========== SHOPKEEPER MANAGEMENT ==========
 
@@ -81,16 +83,13 @@ export class CashbackService {
         );
       }
       
-      // Reapply after rejection: Check balance and deduct fee
-      await this.ensureRegistrationFeeBalance(userId);
-      await this.walletService.debit(userId, this.REGISTRATION_FEE);
-      
+      // Reapply after rejection: No balance check needed (payment method not implemented yet)
       existing.shopName = dto.shopName;
       existing.ownerName = dto.ownerName;
       existing.phone = dto.phone;
       existing.address = dto.address;
       existing.status = 'pending';
-      existing.isRegistrationPaid = true; // Fee PAID at request time
+      existing.isRegistrationPaid = false; // Fee NOT charged - payment method pending
       await existing.save();
       
       // Update user's shopkeeper status to pending
@@ -99,17 +98,14 @@ export class CashbackService {
       await this.createNotification(
         userId,
         'Request Re-submitted',
-        `Your shopkeeper request for \"${dto.shopName}\" has been re-submitted. Registration fee PKR ${this.REGISTRATION_FEE} has been deducted. Waiting for admin review. If rejected, fee will be refunded.`,
+        `Your shopkeeper request for \"${dto.shopName}\" has been re-submitted. Waiting for admin review.`,
         'SYSTEM',
       );
       
-      return { message: 'Shopkeeper request re-submitted. Registration fee PKR ' + this.REGISTRATION_FEE + ' has been charged. If rejected, fee will be refunded.', shopkeeper: existing };
+      return { message: 'Shopkeeper request re-submitted. Waiting for admin review.', shopkeeper: existing };
     }
 
-    // Check balance and deduct fee at request time
-    await this.ensureRegistrationFeeBalance(userId);
-    await this.walletService.debit(userId, this.REGISTRATION_FEE);
-
+    // No balance check needed (payment method not implemented yet)
     const shopkeeper = new this.shopkeeperModel({
       userId: new Types.ObjectId(userId),
       shopName: dto.shopName,
@@ -117,7 +113,7 @@ export class CashbackService {
       phone: dto.phone,
       address: dto.address,
       status: 'pending',
-      isRegistrationPaid: true, // Fee PAID at request time
+      isRegistrationPaid: false, // Fee NOT charged - payment method pending
       couponNumber: this.generateCoupon(),
     });
     await shopkeeper.save();
@@ -128,11 +124,11 @@ export class CashbackService {
     await this.createNotification(
       userId,
       'Request Submitted',
-      `Your shopkeeper request for \"${dto.shopName}\" has been submitted. Registration fee PKR ${this.REGISTRATION_FEE} has been deducted. Waiting for admin review. If rejected, your fee will be refunded.`,
+      `Your shopkeeper request for \"${dto.shopName}\" has been submitted. Waiting for admin review.`,
       'SYSTEM',
     );
 
-    return { message: 'Shopkeeper request submitted. Registration fee PKR ' + this.REGISTRATION_FEE + ' has been charged. If rejected, fee will be refunded.', shopkeeper };
+    return { message: 'Shopkeeper request submitted. Waiting for admin review.', shopkeeper };
   }
 
   /** 
