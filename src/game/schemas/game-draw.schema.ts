@@ -10,6 +10,9 @@ export class GameDraw extends Document {
   winningNumber!: string;
 
   @Prop()
+  winnerTokenId?: string;
+
+  @Prop()
   winnerUserId?: string;
 
   @Prop()
@@ -20,6 +23,9 @@ export class GameDraw extends Document {
 
   @Prop({ required: true, default: 0 })
   totalParticipants!: number;
+
+  @Prop({ default: [] })
+  participantTokenIds!: string[];
 
   @Prop({ required: true })
   drawDate!: Date;

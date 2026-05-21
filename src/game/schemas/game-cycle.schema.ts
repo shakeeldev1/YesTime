@@ -9,6 +9,48 @@ export class GameCycle extends Document {
   @Prop({ required: true, unique: true })
   couponNumber!: string;
 
+  @Prop({ required: true })
+  tokenNumber!: string;
+
+  @Prop({ required: true })
+  cycleDate!: number;
+
+  @Prop({ default: 0 })
+  totalInvested!: number;
+
+  @Prop({ default: 1000 })
+  currentReward!: number;
+
+  @Prop({ default: 0 })
+  totalWins!: number;
+
+  @Prop({ default: 0 })
+  totalLosses!: number;
+
+  @Prop()
+  lastPlayedMonth?: number;
+
+  @Prop()
+  lastPlayedYear?: number;
+
+  @Prop({ default: false })
+  autoJoinEnabledForCurrentCycle!: boolean;
+
+  @Prop({ default: false })
+  hasPlayedCurrentCycle!: boolean;
+
+  @Prop({ default: 0 })
+  playsUsedThisCycle!: number;
+
+  @Prop({ default: false })
+  queuedForNextRound!: boolean;
+
+  @Prop()
+  lastParticipatedAt?: Date;
+
+  @Prop()
+  nextEligiblePlayDate?: Date;
+
   @Prop({ required: true, default: 1 })
   currentDay!: number;
 
@@ -35,6 +77,9 @@ export class GameCycle extends Document {
 
   @Prop({ default: 0 })
   permanentPrizeAmount!: number;
+
+  @Prop({ default: 'none' })
+  participationMode!: string;
 
   @Prop()
   lastPaymentDate!: Date;

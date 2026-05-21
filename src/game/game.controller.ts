@@ -7,6 +7,7 @@ import {
   Query,
   UseGuards,
   Request,
+  Body,
 } from '@nestjs/common';
 import { GameService } from './game.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -27,8 +28,20 @@ export class GameController {
 
   @UseGuards(JwtAuthGuard)
   @Post('daily-payment')
-  async makeDailyPayment(@Request() req) {
-    return this.gameService.makeDailyPayment(req.user.userId);
+  async makeDailyPayment(@Request() req, @Body() body?: { tokenId?: string }) {
+    return this.gameService.playNow(req.user.userId, body?.tokenId);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Post('play-now')
+  async playNow(@Request() req, @Body() body?: { tokenId?: string }) {
+    return this.gameService.playNow(req.user.userId, body?.tokenId);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Post('auto-join-next-round')
+  async autoJoinNextRound(@Request() req, @Body() body?: { tokenId?: string }) {
+    return this.gameService.autoJoinNextRound(req.user.userId, body?.tokenId);
   }
 
   @UseGuards(JwtAuthGuard)

@@ -1,6 +1,6 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
-import { Model } from 'mongoose';
+import { ClientSession, Model } from 'mongoose';
 import { GameCycle } from './schemas/game-cycle.schema';
 import { GameDraw } from './schemas/game-draw.schema';
 import { GamePayment } from './schemas/game-payment.schema';
@@ -11,9 +11,10 @@ import { MailerService } from '../mailer/mailer.service';
 
 @Injectable()
 export class GameService {
-  private readonly DAILY_AMOUNT = 50;
-  private readonly CYCLE_DAYS = 30;
-  private readonly BASE_PRIZE = 1000; // Day 1 prize; increases by 1000 each day
+  private readonly INVESTMENT_AMOUNT = 50;
+  private readonly REWARD_PER_INVESTMENT = 1000;
+  private readonly MAX_REWARD = 30000;
+  private readonly drawLock = { active: false };
 
   constructor(
     @InjectModel(GameCycle.name) private readonly cycleModel: Model<GameCycle>,
@@ -25,235 +26,433 @@ export class GameService {
     private readonly mailerService: MailerService,
   ) {}
 
-  // Generate a unique 6-digit coupon number
   private generateCoupon(): string {
     return String(Math.floor(100000 + Math.random() * 900000));
   }
 
-  // Generate random 6-digit winning number for draw
   private generateWinningNumber(): string {
     return String(Math.floor(100000 + Math.random() * 900000));
   }
 
-  // Get prize amount based on day number: day 1 = 1000, day 2 = 2000, ..., day 30 = 30000
-  private getPrizeForDay(day: number): number {
-    return day * this.BASE_PRIZE;
+  private getMonthKey(date = new Date()): string {
+    return `${date.getFullYear()}-${date.getMonth() + 1}`;
   }
 
-  // ============================
-  // JOIN GAME / START FIRST CYCLE
-  // ============================
-  async joinGame(userId: string) {
-    // Check if user already has an active cycle
-    const existingCycle = await this.cycleModel.findOne({ userId, status: 'active' });
-    if (existingCycle) {
-      throw new BadRequestException('You already have an active game cycle');
+  private getDaysInMonth(date = new Date()): number {
+    return new Date(date.getFullYear(), date.getMonth() + 1, 0).getDate();
+  }
+
+  private getCycleDateForToday(date = new Date()): number {
+    return Math.min(date.getDate(), this.getDaysInMonth(date));
+  }
+
+  private normalizeDate(date: Date): Date {
+    const normalized = new Date(date);
+    normalized.setHours(0, 0, 0, 0);
+    return normalized;
+  }
+
+  private getEligibleDateForMonth(cycleDate: number, referenceDate = new Date()): Date {
+    const day = Math.min(cycleDate, this.getDaysInMonth(referenceDate));
+    return this.normalizeDate(new Date(referenceDate.getFullYear(), referenceDate.getMonth(), day));
+  }
+
+  private getNextEligiblePlayDateForToken(token: GameCycle, referenceDate = new Date()): Date {
+    const currentEligibleDate = this.getEligibleDateForMonth(this.getCycleDateValue(token), referenceDate);
+    const today = this.normalizeDate(referenceDate);
+    const playedThisMonth = this.wasPlayedThisMonth(token, referenceDate);
+
+    if (!playedThisMonth && currentEligibleDate.getTime() >= today.getTime()) {
+      return currentEligibleDate;
     }
 
-    // Check wallet balance
-    const balance = await this.walletService.getBalance(userId);
-    if (balance < this.DAILY_AMOUNT) {
-      throw new BadRequestException(`Insufficient wallet balance. You need at least PKR ${this.DAILY_AMOUNT}`);
-    }
+    const nextMonth = new Date(referenceDate.getFullYear(), referenceDate.getMonth() + 1, 1);
+    return this.getEligibleDateForMonth(this.getCycleDateValue(token), nextMonth);
+  }
 
-    // Debit wallet
-    await this.walletService.debit(userId, this.DAILY_AMOUNT);
+  private getCycleDateValue(token: GameCycle): number {
+    return Number((token as any).cycleDate || new Date((token as any).cycleStartDate || Date.now()).getDate());
+  }
 
-    // Create new cycle
-    const coupon = this.generateCoupon();
-    const now = new Date();
-    const cycle = new this.cycleModel({
-      userId,
-      couponNumber: coupon,
-      currentDay: 1,
-      totalSavings: this.DAILY_AMOUNT,
-      dailyAmount: this.DAILY_AMOUNT,
-      cycleDays: this.CYCLE_DAYS,
-      status: 'active',
-      cycleStartDate: now,
-      cycleEndDate: new Date(now.getTime() + this.CYCLE_DAYS * 24 * 60 * 60 * 1000),
-      isPermanent: false,
-      permanentPrizeAmount: 0,
-      lastPaymentDate: now,
-      paymentDates: [now],
-    });
-    await cycle.save();
+  private getTokenInvestedValue(token: GameCycle): number {
+    const legacyAmount = Number((token as any).totalSavings || 0);
+    const invested = Number((token as any).totalInvested || 0);
+    if (invested > 0) return invested;
+    if (legacyAmount > 0) return legacyAmount;
+    return Math.max(50, Number((token as any).currentDay || 1) * this.INVESTMENT_AMOUNT);
+  }
 
-    // Record payment
-    const payment = new this.paymentModel({
-      userId,
-      cycleId: cycle._id.toString(),
-      couponNumber: coupon,
-      amount: this.DAILY_AMOUNT,
-      dayNumber: 1,
-      paymentDate: now,
-      status: 'completed',
-    });
-    await payment.save();
+  private getTokenRewardValue(token: GameCycle): number {
+    const explicitReward = Number((token as any).currentReward || 0);
+    if (explicitReward > 0) return explicitReward;
+    const invested = this.getTokenInvestedValue(token);
+    return Math.min(invested * 20, this.MAX_REWARD);
+  }
 
-    // Create notification
-    await this.createNotification(userId, 'Game Joined!', `You joined the Risk-Free Game! Coupon: ${coupon}. PKR ${this.DAILY_AMOUNT} deducted from wallet.`, 'GAME');
+  private getCurrentDayValue(token: GameCycle): number {
+    const invested = this.getTokenInvestedValue(token);
+    return Math.max(1, Math.ceil(invested / this.INVESTMENT_AMOUNT));
+  }
+
+  private isPermanentToken(token: GameCycle): boolean {
+    return Boolean((token as any).isPermanent) || this.getTokenRewardValue(token) >= this.MAX_REWARD;
+  }
+
+  private wasPlayedThisMonth(token: GameCycle, referenceDate = new Date()): boolean {
+    const lastMonth = Number((token as any).lastPlayedMonth || 0);
+    const lastYear = Number((token as any).lastPlayedYear || 0);
+    if (lastMonth !== referenceDate.getMonth() + 1 || lastYear !== referenceDate.getFullYear()) return false;
+    const playsUsed = Number((token as any).playsUsedThisCycle || 0);
+    if (playsUsed > 0) return true;
+    return Boolean((token as any).hasPlayedCurrentCycle);
+  }
+
+  private canParticipateToday(token: GameCycle, referenceDate = new Date()): boolean {
+    const today = this.normalizeDate(referenceDate);
+    const eligibleDate = this.getEligibleDateForMonth(this.getCycleDateValue(token), referenceDate);
+    if (eligibleDate.getTime() !== today.getTime()) return false;
+
+    // Determine remaining plays: plays purchased - plays used in this cycle
+    const purchased = Math.floor(this.getTokenInvestedValue(token) / this.INVESTMENT_AMOUNT);
+    const playsUsed = this.wasPlayedThisMonth(token, referenceDate) ? Number((token as any).playsUsedThisCycle || 0) : 0;
+    const remaining = purchased - playsUsed;
+    return remaining > 0 && !this.isQueued(token);
+  }
+
+  private isQueued(token: GameCycle): boolean {
+    return Boolean((token as any).queuedForNextRound);
+  }
+
+  private isEligibleForAction(token: GameCycle, referenceDate = new Date()): boolean {
+    return this.canParticipateToday(token, referenceDate) && !this.isQueued(token);
+  }
+
+  private getTokenStatus(token: GameCycle, referenceDate = new Date()): string {
+    if (this.isQueued(token)) return 'queued';
+    if (this.wasPlayedThisMonth(token, referenceDate)) return 'played';
+    if (this.isPermanentToken(token)) return 'permanent';
+    return 'active';
+  }
+
+  private buildTokenView(token: GameCycle, referenceDate = new Date()) {
+    const invested = this.getTokenInvestedValue(token);
+    const reward = this.getTokenRewardValue(token);
+    const eligibleDate = this.getEligibleDateForMonth(this.getCycleDateValue(token), referenceDate);
+    const nextEligiblePlayDate = this.getNextEligiblePlayDateForToken(token, referenceDate);
+    const currentDay = this.getCurrentDayValue(token);
+    const eligibleToday = this.canParticipateToday(token, referenceDate);
+    const queued = this.isQueued(token);
 
     return {
-      message: 'Successfully joined the game!',
-      cycle: {
-        id: cycle._id,
-        couponNumber: coupon,
-        currentDay: 1,
-        totalSavings: this.DAILY_AMOUNT,
-        status: 'active',
-        cycleStartDate: now,
-        prizeIfWinToday: this.getPrizeForDay(1),
-      },
+      id: token._id,
+      tokenId: token._id,
+      tokenNumber: (token as any).tokenNumber || token.couponNumber,
+      couponNumber: token.couponNumber,
+      userId: token.userId,
+      cycleDate: this.getCycleDateValue(token),
+      cycleDateLabel: eligibleDate.toISOString().slice(0, 10),
+      totalInvested: invested,
+      totalSavings: invested,
+      currentReward: reward,
+      prizeIfWinToday: reward,
+      totalWins: Number((token as any).totalWins || 0),
+      totalLosses: Number((token as any).totalLosses || 0),
+      isPermanent: this.isPermanentToken(token),
+      permanentPrizeAmount: Number((token as any).permanentPrizeAmount || (this.isPermanentToken(token) ? this.MAX_REWARD : 0)),
+      lastPlayedMonth: (token as any).lastPlayedMonth || null,
+      lastPlayedYear: (token as any).lastPlayedYear || null,
+      autoJoinEnabledForCurrentCycle: Boolean((token as any).autoJoinEnabledForCurrentCycle),
+      hasPlayedCurrentCycle: this.wasPlayedThisMonth(token, referenceDate),
+      playsPurchased: Math.floor(invested / this.INVESTMENT_AMOUNT),
+      playsUsed: this.wasPlayedThisMonth(token, referenceDate) ? Number((token as any).playsUsedThisCycle || 0) : 0,
+      playsRemaining: Math.max(0, Math.floor(invested / this.INVESTMENT_AMOUNT) - (this.wasPlayedThisMonth(token, referenceDate) ? Number((token as any).playsUsedThisCycle || 0) : 0)),
+      queuedForNextRound: queued,
+      participationMode: (token as any).participationMode || 'none',
+      currentDay,
+      daysLeft: Math.max(0, 30 - currentDay),
+      status: this.getTokenStatus(token, referenceDate),
+      cycleStartDate: (token as any).cycleStartDate || new Date((token as any).cycleDate ? new Date().setDate(Number((token as any).cycleDate)) : Date.now()),
+      cycleEndDate: (token as any).cycleEndDate || nextEligiblePlayDate,
+      lastPaymentDate: (token as any).lastPaymentDate || null,
+      nextEligiblePlayDate,
+      canPlayNow: eligibleToday,
+      canAutoJoin: eligibleToday,
+      canInvestToday: true,
+      playStatus: queued ? 'queued' : eligibleToday ? 'eligible' : 'locked',
     };
   }
 
-  // ============================
-  // DAILY PAYMENT (add daily amount)
-  // ============================
-  async makeDailyPayment(userId: string) {
-    const cycle = await this.cycleModel.findOne({ userId, status: 'active' });
-    if (!cycle) {
-      throw new NotFoundException('No active game cycle found. Please join the game first.');
-    }
+  private async savePaymentRecord(
+    session: ClientSession | null,
+    data: Partial<GamePayment> & { userId: string; cycleId: string; couponNumber: string; paymentDate: Date; amount: number; dayNumber: number },
+  ) {
+    const payment = new this.paymentModel(data as any);
+    await payment.save({ session: session || undefined });
+    return payment;
+  }
 
-    // Check if already paid today
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const lastPayment = cycle.lastPaymentDate ? new Date(cycle.lastPaymentDate) : null;
-    if (lastPayment) {
-      const lastPayDay = new Date(lastPayment);
-      lastPayDay.setHours(0, 0, 0, 0);
-      if (lastPayDay.getTime() === today.getTime()) {
-        throw new BadRequestException('You have already made today\'s payment');
+  private async syncPermanentToken(token: GameCycle, session: ClientSession | null = null) {
+    const reward = this.getTokenRewardValue(token);
+    if (reward >= this.MAX_REWARD) {
+      (token as any).isPermanent = true;
+      (token as any).permanentPrizeAmount = this.MAX_REWARD;
+    } else {
+      (token as any).isPermanent = false;
+      (token as any).permanentPrizeAmount = 0;
+    }
+    await token.save({ session: session || undefined });
+    return token;
+  }
+
+  private async findMostRelevantToken(userId: string, tokenId?: string) {
+    const tokens = await this.cycleModel.find({ userId }).sort({ createdAt: -1 });
+    if (tokenId) {
+      const byId = tokens.find((token) => token._id.toString() === tokenId);
+      if (!byId) {
+        throw new NotFoundException('Token not found');
       }
+      return byId;
     }
 
-    if (cycle.currentDay >= this.CYCLE_DAYS) {
-      throw new BadRequestException('This cycle is already complete (30 days done)');
+    const now = new Date();
+    const eligibleToday = tokens.filter((token) => this.canParticipateToday(token, now));
+    if (eligibleToday.length > 0) {
+      return eligibleToday.sort((a, b) => this.getTokenRewardValue(b) - this.getTokenRewardValue(a))[0];
     }
 
-    // Check wallet balance
-    const balance = await this.walletService.getBalance(userId);
-    if (balance < this.DAILY_AMOUNT) {
-      throw new BadRequestException(`Insufficient wallet balance. You need at least PKR ${this.DAILY_AMOUNT}`);
+    return tokens[0] || null;
+  }
+
+  async joinGame(userId: string) {
+    const now = new Date();
+    const cycleDate = this.getCycleDateForToday(now);
+    const session = await this.cycleModel.db.startSession();
+
+    try {
+      let tokenResult: GameCycle | null = null;
+
+      await session.withTransaction(async () => {
+        await this.walletService.debit(userId, this.INVESTMENT_AMOUNT, 'Token investment', session);
+
+        const existingToken = await this.cycleModel
+          .findOne({ userId, cycleDate })
+          .sort({ createdAt: -1 })
+          .session(session);
+
+        const existingReward = existingToken ? this.getTokenRewardValue(existingToken) : 0;
+        const shouldUpgradeExisting = Boolean(existingToken && existingReward < this.MAX_REWARD);
+
+        if (shouldUpgradeExisting && existingToken) {
+          const nextInvested = this.getTokenInvestedValue(existingToken) + this.INVESTMENT_AMOUNT;
+          existingToken.set({
+            tokenNumber: (existingToken as any).tokenNumber || existingToken.couponNumber,
+            cycleDate,
+            totalInvested: nextInvested,
+            currentReward: Math.min(nextInvested * 20, this.MAX_REWARD),
+            currentDay: Math.max(1, Math.ceil(nextInvested / this.INVESTMENT_AMOUNT)),
+            totalSavings: nextInvested,
+            dailyAmount: this.INVESTMENT_AMOUNT,
+            cycleDays: 30,
+            status: 'active',
+            isPermanent: Math.min(nextInvested * 20, this.MAX_REWARD) >= this.MAX_REWARD,
+            permanentPrizeAmount: Math.min(nextInvested * 20, this.MAX_REWARD) >= this.MAX_REWARD ? this.MAX_REWARD : 0,
+            nextEligiblePlayDate: this.getNextEligiblePlayDateForToken(existingToken, now),
+          });
+          tokenResult = await this.syncPermanentToken(existingToken, session);
+        } else {
+          const tokenNumber = this.generateCoupon();
+          const newToken = new this.cycleModel({
+            userId,
+            couponNumber: tokenNumber,
+            tokenNumber,
+            cycleDate,
+            totalInvested: this.INVESTMENT_AMOUNT,
+            currentReward: Math.min(this.INVESTMENT_AMOUNT * 20, this.MAX_REWARD),
+            totalWins: 0,
+            totalLosses: 0,
+            currentDay: 1,
+            totalSavings: this.INVESTMENT_AMOUNT,
+            dailyAmount: this.INVESTMENT_AMOUNT,
+            cycleDays: 30,
+            status: 'active',
+            cycleStartDate: now,
+            cycleEndDate: this.getEligibleDateForMonth(cycleDate, new Date(now.getFullYear(), now.getMonth() + 1, 1)),
+            isPermanent: false,
+            permanentPrizeAmount: 0,
+            lastPaymentDate: now,
+            paymentDates: [now],
+            autoJoinEnabledForCurrentCycle: false,
+            hasPlayedCurrentCycle: false,
+            queuedForNextRound: false,
+            participationMode: 'none',
+          });
+          newToken.set({ nextEligiblePlayDate: this.getNextEligiblePlayDateForToken(newToken, now) });
+          tokenResult = await this.syncPermanentToken(newToken, session);
+        }
+
+        if (!tokenResult) {
+          throw new BadRequestException('Unable to create token');
+        }
+
+        await this.savePaymentRecord(session, {
+          userId,
+          cycleId: tokenResult._id.toString(),
+          couponNumber: tokenResult.couponNumber,
+          tokenId: tokenResult._id.toString(),
+          tokenNumber: (tokenResult as any).tokenNumber || tokenResult.couponNumber,
+          cycleDate,
+          amount: this.INVESTMENT_AMOUNT,
+          dayNumber: this.getCurrentDayValue(tokenResult),
+          action: 'investment',
+          participationMode: 'manual',
+          rewardAmount: this.getTokenRewardValue(tokenResult),
+          paymentDate: now,
+          status: 'completed',
+        } as any);
+      });
+
+      const walletBalance = await this.walletService.getBalance(userId);
+      return {
+        message: tokenResult && this.getTokenInvestedValue(tokenResult) === this.INVESTMENT_AMOUNT ? 'Token created successfully.' : 'Token upgraded successfully.',
+        walletBalance,
+        token: tokenResult ? this.buildTokenView(tokenResult, now) : null,
+      };
+    } finally {
+      await session.endSession();
+    }
+  }
+
+  async playNow(userId: string, tokenId?: string) {
+    const now = new Date();
+    const token = await this.findMostRelevantToken(userId, tokenId);
+    if (!token) {
+      throw new NotFoundException('No token found. Invest ₹50 first.');
     }
 
-    // Debit wallet
-    await this.walletService.debit(userId, this.DAILY_AMOUNT);
+    if (!this.canParticipateToday(token, now)) {
+      throw new BadRequestException('This token can only play on its monthly cycle date.');
+    }
 
-    // Update cycle
-    cycle.currentDay += 1;
-    cycle.totalSavings += this.DAILY_AMOUNT;
-    cycle.lastPaymentDate = new Date();
-    cycle.paymentDates.push(new Date());
-    await cycle.save();
+    // allow multiple participations per cycle if user has remaining plays
 
-    // Record payment
-    const payment = new this.paymentModel({
-      userId,
-      cycleId: cycle._id.toString(),
-      couponNumber: cycle.couponNumber,
-      amount: this.DAILY_AMOUNT,
-      dayNumber: cycle.currentDay,
-      paymentDate: new Date(),
-      status: 'completed',
+    if (this.isQueued(token) && (token as any).participationMode === 'auto') {
+      throw new BadRequestException('Auto join is already enabled for this token.');
+    }
+
+    if ((token as any).queuedForNextRound && (token as any).participationMode === 'play') {
+      return {
+        message: 'Token is already queued for play.',
+        token: this.buildTokenView(token, now),
+      };
+    }
+
+    token.set({
+      queuedForNextRound: true,
+      participationMode: 'play',
+      autoJoinEnabledForCurrentCycle: false,
+      nextEligiblePlayDate: this.getNextEligiblePlayDateForToken(token, now),
     });
-    await payment.save();
-
-    // Notification
-    await this.createNotification(
-      userId,
-      `Day ${cycle.currentDay} Payment`,
-      `PKR ${this.DAILY_AMOUNT} added. Total savings: PKR ${cycle.totalSavings}. Prize today: PKR ${this.getPrizeForDay(cycle.currentDay)}`,
-      'SAVINGS',
-    );
+    await token.save();
 
     return {
-      message: `Day ${cycle.currentDay} payment successful!`,
-      cycle: {
-        id: cycle._id,
-        couponNumber: cycle.couponNumber,
-        currentDay: cycle.currentDay,
-        totalSavings: cycle.totalSavings,
-        daysLeft: this.CYCLE_DAYS - cycle.currentDay,
-        prizeIfWinToday: this.getPrizeForDay(cycle.currentDay),
-      },
+      message: 'Token queued for Play Now. It will join the next draw once.',
+      token: this.buildTokenView(token, now),
     };
   }
 
-  // ============================
-  // GET ACTIVE CYCLE (dashboard overview)
-  // ============================
-  async getActiveCycle(userId: string) {
-    const cycle = await this.cycleModel.findOne({ userId, status: 'active' });
-    if (!cycle) {
-      return { hasCycle: false, cycle: null };
+  async autoJoinNextRound(userId: string, tokenId?: string) {
+    const now = new Date();
+    const token = await this.findMostRelevantToken(userId, tokenId);
+    if (!token) {
+      throw new NotFoundException('No token found. Invest ₹50 first.');
     }
 
-    const nextDraw = await this.getNextDrawInfo();
+    if (!this.canParticipateToday(token, now)) {
+      throw new BadRequestException('This token can only auto-join on its monthly cycle date.');
+    }
+
+    // allow multiple participations per cycle if user has remaining plays
+
+    if ((token as any).queuedForNextRound && (token as any).participationMode === 'play') {
+      throw new BadRequestException('Play Now is already queued for this token.');
+    }
+
+    if ((token as any).queuedForNextRound && (token as any).participationMode === 'auto') {
+      return {
+        message: 'Auto join is already enabled for this token.',
+        token: this.buildTokenView(token, now),
+      };
+    }
+
+    token.set({
+      queuedForNextRound: true,
+      autoJoinEnabledForCurrentCycle: true,
+      participationMode: 'auto',
+      nextEligiblePlayDate: this.getNextEligiblePlayDateForToken(token, now),
+    });
+    await token.save();
+
+    return {
+      message: 'Auto join enabled for the next draw. It will reset after one participation.',
+      token: this.buildTokenView(token, now),
+    };
+  }
+
+  async makeDailyPayment(userId: string) {
+    return this.playNow(userId);
+  }
+
+  async getActiveCycle(userId: string) {
+    const now = new Date();
+    const tokens = await this.cycleModel.find({ userId }).sort({ createdAt: -1 });
+    if (tokens.length === 0) {
+      return { hasCycle: false, cycle: null, tokens: [] };
+    }
+
+    const activeToken = tokens.find((token) => this.canParticipateToday(token, now) && this.isQueued(token))
+      || tokens.find((token) => this.canParticipateToday(token, now))
+      || tokens[0];
 
     return {
       hasCycle: true,
-      cycle: {
-        id: cycle._id,
-        couponNumber: cycle.couponNumber,
-        currentDay: cycle.currentDay,
-        totalSavings: cycle.totalSavings,
-        daysLeft: this.CYCLE_DAYS - cycle.currentDay,
-        status: cycle.status,
-        cycleStartDate: cycle.cycleStartDate,
-        cycleEndDate: cycle.cycleEndDate,
-        isPermanent: cycle.isPermanent,
-        permanentPrizeAmount: cycle.permanentPrizeAmount,
-        prizeIfWinToday: this.getPrizeForDay(cycle.currentDay),
-        lastPaymentDate: cycle.lastPaymentDate,
-        canPayToday: this.canPayToday(cycle),
-      },
-      nextDraw,
+      cycle: activeToken ? this.buildTokenView(activeToken, now) : null,
+      activeToken: activeToken ? this.buildTokenView(activeToken, now) : null,
+      tokens: tokens.map((token) => this.buildTokenView(token, now)),
+      nextEligiblePlayDate: tokens
+        .map((token) => this.getNextEligiblePlayDateForToken(token, now))
+        .sort((a, b) => a.getTime() - b.getTime())[0] || null,
     };
   }
 
-  private canPayToday(cycle: GameCycle): boolean {
-    if (cycle.currentDay >= this.CYCLE_DAYS) return false;
-    if (!cycle.lastPaymentDate) return true;
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const lastPayDay = new Date(cycle.lastPaymentDate);
-    lastPayDay.setHours(0, 0, 0, 0);
-    return lastPayDay.getTime() < today.getTime();
-  }
-
-  // ============================
-  // GET SAVINGS
-  // ============================
   async getSavings(userId: string) {
-    const activeCycle = await this.cycleModel.findOne({ userId, status: 'active' });
-    const completedCycles = await this.cycleModel.find({ userId, status: 'completed' });
-    const wonCycles = await this.cycleModel.find({ userId, status: 'won' });
-
-    const activeSavings = activeCycle ? activeCycle.totalSavings : 0;
-    const completedSavings = completedCycles.reduce((sum, c) => sum + c.totalSavings, 0);
-    const totalWinnings = wonCycles.reduce((sum, c) => sum + (c.permanentPrizeAmount || 0), 0);
+    const now = new Date();
+    const tokens = await this.cycleModel.find({ userId }).sort({ createdAt: -1 });
+    const totalInvested = tokens.reduce((sum, token) => sum + this.getTokenInvestedValue(token), 0);
+    const totalWinnings = await this.drawModel.find({ winnerUserId: userId }).then((draws) => draws.reduce((sum, draw) => sum + draw.prizeAmount, 0));
+    const permanentTokens = tokens.filter((token) => this.isPermanentToken(token));
+    const activeToken = tokens.find((token) => this.canParticipateToday(token, now) && this.isQueued(token))
+      || tokens.find((token) => this.canParticipateToday(token, now))
+      || tokens[0] || null;
 
     return {
-      activeSavings,
-      completedSavings,
+      activeSavings: totalInvested,
+      completedSavings: permanentTokens.reduce((sum, token) => sum + this.getTokenInvestedValue(token), 0),
       totalWinnings,
-      totalSavings: activeSavings + completedSavings,
-      activeCycle: activeCycle ? {
-        couponNumber: activeCycle.couponNumber,
-        currentDay: activeCycle.currentDay,
-        totalSavings: activeCycle.totalSavings,
+      totalSavings: totalInvested,
+      activeCycle: activeToken ? {
+        tokenNumber: (activeToken as any).tokenNumber || activeToken.couponNumber,
+        couponNumber: activeToken.couponNumber,
+        currentDay: this.getCurrentDayValue(activeToken),
+        totalSavings: this.getTokenInvestedValue(activeToken),
+        currentReward: this.getTokenRewardValue(activeToken),
+        nextEligiblePlayDate: this.getNextEligiblePlayDateForToken(activeToken, now),
       } : null,
-      completedCyclesCount: completedCycles.length,
-      wonCyclesCount: wonCycles.length,
+      completedCyclesCount: permanentTokens.length,
+      wonCyclesCount: tokens.reduce((sum, token) => sum + Number((token as any).totalWins || 0), 0),
+      totalTokens: tokens.length,
     };
   }
 
-  // ============================
-  // GET PAYMENT HISTORY
-  // ============================
   async getPaymentHistory(userId: string, limit = 50, page = 1) {
     const skip = (page - 1) * limit;
     const payments = await this.paymentModel
@@ -267,208 +466,181 @@ export class GameService {
     return { payments, total, page, limit };
   }
 
-  // ============================
-  // GET ALL USER COUPONS (active + permanent + completed)
-  // ============================
   async getUserCoupons(userId: string) {
-    const cycles = await this.cycleModel.find({ userId }).sort({ createdAt: -1 });
-    return cycles.map((c) => ({
-      id: c._id,
-      couponNumber: c.couponNumber,
-      currentDay: c.currentDay,
-      totalSavings: c.totalSavings,
-      status: c.status,
-      isPermanent: c.isPermanent,
-      permanentPrizeAmount: c.permanentPrizeAmount,
-      cycleStartDate: c.cycleStartDate,
-      cycleEndDate: c.cycleEndDate,
-      prizeIfWinToday: c.status === 'active' ? this.getPrizeForDay(c.currentDay) : 0,
-    }));
+    const tokens = await this.cycleModel.find({ userId }).sort({ createdAt: -1 });
+    return tokens.map((token) => this.buildTokenView(token));
   }
 
-  // ============================
-  // LUCKY DRAW EXECUTION (called by scheduler)
-  // ============================
   async executeLuckyDraw() {
-    // Get all active + permanent coupons
-    const activeCycles = await this.cycleModel.find({
-      $or: [{ status: 'active' }, { isPermanent: true, status: 'completed' }],
-    });
-
-    if (activeCycles.length === 0) {
-      return { message: 'No participants for the draw', draw: null };
+    if (this.drawLock.active) {
+      return { message: 'Draw already in progress', draw: null };
     }
 
-    // Generate winning number
-    const winningNumber = this.generateWinningNumber();
+    this.drawLock.active = true;
+    const session = await this.cycleModel.db.startSession();
+    const now = new Date();
 
-    // Check if any coupon matches
-    const winner = activeCycles.find((c) => c.couponNumber === winningNumber);
+    try {
+      const queuedTokens = await this.cycleModel.find({ queuedForNextRound: true }).sort({ createdAt: 1 });
+      const winningNumber = this.generateWinningNumber();
+      const lastDraw = await this.drawModel.findOne().sort({ drawNumber: -1 });
+      const drawNumber = lastDraw ? lastDraw.drawNumber + 1 : 1;
 
-    // Get next draw number
-    const lastDraw = await this.drawModel.findOne().sort({ drawNumber: -1 });
-    const drawNumber = lastDraw ? lastDraw.drawNumber + 1 : 1;
+      let winnerToken: GameCycle | null = queuedTokens.find((token) => token.couponNumber === winningNumber) || null;
+      let prizeAmount = 0;
+      let winnerUserId: string | undefined;
+      let winnerCoupon: string | undefined;
+      let winnerTokenId: string | undefined;
 
-    let prizeAmount = 0;
-    let winnerUserId: string | undefined = undefined;
-    let winnerCoupon: string | undefined = undefined;
+      await session.withTransaction(async () => {
+        if (winnerToken) {
+          prizeAmount = this.getTokenRewardValue(winnerToken);
+          winnerUserId = winnerToken.userId;
+          winnerCoupon = winnerToken.couponNumber;
+          winnerTokenId = winnerToken._id.toString();
 
-    if (winner) {
-      // Determine prize
-      if (winner.isPermanent) {
-        prizeAmount = winner.permanentPrizeAmount || 30000;
-      } else {
-        prizeAmount = this.getPrizeForDay(winner.currentDay);
-      }
+          await this.walletService.credit(winnerToken.userId, prizeAmount, 'Game token win', session);
 
-      winnerUserId = winner.userId;
-      winnerCoupon = winner.couponNumber;
+          // Increment per-cycle plays used counter
+          const prevMonth = Number((winnerToken as any).lastPlayedMonth || 0);
+          const prevYear = Number((winnerToken as any).lastPlayedYear || 0);
+          let playsUsed = Number((winnerToken as any).playsUsedThisCycle || 0);
+          if (prevMonth === now.getMonth() + 1 && prevYear === now.getFullYear()) {
+            playsUsed += 1;
+          } else {
+            playsUsed = 1;
+          }
 
-      // Credit winner's wallet
-      await this.walletService.credit(winner.userId, prizeAmount);
+          winnerToken.set({
+            totalWins: Number((winnerToken as any).totalWins || 0) + 1,
+            hasPlayedCurrentCycle: true,
+            lastPlayedMonth: now.getMonth() + 1,
+            lastPlayedYear: now.getFullYear(),
+            playsUsedThisCycle: playsUsed,
+            lastParticipatedAt: now,
+            queuedForNextRound: false,
+            autoJoinEnabledForCurrentCycle: false,
+            participationMode: 'none',
+          });
+          await winnerToken.save({ session });
 
-      // Update cycle status
-      winner.status = 'won';
-      await winner.save();
+          const winnerUser = await this.userModel.findById(winnerToken.userId).session(session);
+          if (winnerUser) {
+            try {
+              await this.mailerService.sendLotteryWinEmail(
+                winnerUser.email,
+                winnerUser.name,
+                winnerToken.couponNumber,
+                prizeAmount,
+                'Game Dashboard',
+              );
+            } catch {
+              // Email failures should not block the draw.
+            }
+          }
 
-      // Send email notification to winner
-      const winnerUser = await this.userModel.findById(winner.userId);
-      if (winnerUser) {
-        await this.mailerService.sendLotteryWinEmail(
-          winnerUser.email,
-          winnerUser.name,
-          winner.couponNumber,
-          prizeAmount,
-          'Daily Bonus',
-        );
-      }
-
-      // Notify winner
-      await this.createNotification(
-        winner.userId,
-        '🎉 YOU WON!',
-        `Congratulations! Your coupon ${winner.couponNumber} won PKR ${prizeAmount} in Lucky Draw #${drawNumber}!`,
-        'WIN',
-      );
-    }
-
-    // For non-winners with active cycles: savings are already tracked in totalSavings
-    // Check cycles that completed 30 days and convert them to permanent
-    await this.checkAndConvertCompletedCycles();
-
-    // Record draw
-    const draw = new this.drawModel({
-      drawNumber,
-      winningNumber,
-      winnerUserId,
-      winnerCoupon,
-      prizeAmount,
-      totalParticipants: activeCycles.length,
-      drawDate: new Date(),
-      status: 'completed',
-    });
-    await draw.save();
-
-    // Only notify participants when someone actually wins
-    if (winner) {
-      for (const cycle of activeCycles) {
-        if (cycle.userId !== winnerUserId) {
           await this.createNotification(
-            cycle.userId,
-            `Draw #${drawNumber} Result`,
-            `Winning number: ${winningNumber}. Winner: ${winnerCoupon}. Your savings are safe!`,
-            'GAME',
+            winnerToken.userId,
+            '🎉 YOU WON!',
+            `Congratulations! Your token ${winnerToken.couponNumber} won PKR ${prizeAmount} in Draw #${drawNumber}.`,
+            'WIN',
+            session,
           );
         }
-      }
-    }
 
-    return {
-      draw: {
-        drawNumber,
-        winningNumber,
-        hasWinner: !!winner,
-        winnerCoupon,
-        prizeAmount,
-        totalParticipants: activeCycles.length,
-        drawDate: draw.drawDate,
-      },
-    };
+        for (const token of queuedTokens) {
+          if (winnerToken && token._id.toString() === winnerToken._id.toString()) {
+            continue;
+          }
+
+          // Increment per-cycle plays used counter for this token
+          const prevMonth = Number((token as any).lastPlayedMonth || 0);
+          const prevYear = Number((token as any).lastPlayedYear || 0);
+          let playsUsed = Number((token as any).playsUsedThisCycle || 0);
+          if (prevMonth === now.getMonth() + 1 && prevYear === now.getFullYear()) {
+            playsUsed += 1;
+          } else {
+            playsUsed = 1;
+          }
+
+          token.set({
+            totalLosses: Number((token as any).totalLosses || 0) + 1,
+            hasPlayedCurrentCycle: true,
+            lastPlayedMonth: now.getMonth() + 1,
+            lastPlayedYear: now.getFullYear(),
+            playsUsedThisCycle: playsUsed,
+            lastParticipatedAt: now,
+            queuedForNextRound: false,
+            autoJoinEnabledForCurrentCycle: false,
+            participationMode: 'none',
+          });
+          await token.save({ session });
+        }
+
+        for (const token of queuedTokens) {
+          await this.syncPermanentToken(token, session);
+        }
+
+        const draw = new this.drawModel({
+          drawNumber,
+          winningNumber,
+          winnerTokenId,
+          winnerUserId,
+          winnerCoupon,
+          prizeAmount,
+          totalParticipants: queuedTokens.length,
+          participantTokenIds: queuedTokens.map((token) => token._id.toString()),
+          drawDate: now,
+          status: 'completed',
+        });
+        await draw.save({ session });
+      });
+
+      return {
+        draw: {
+          drawNumber,
+          winningNumber,
+          hasWinner: Boolean(winnerToken),
+          winnerCoupon,
+          prizeAmount,
+          totalParticipants: queuedTokens.length,
+          drawDate: now,
+          winnerTokenId,
+        },
+      };
+    } finally {
+      this.drawLock.active = false;
+      await session.endSession();
+    }
   }
 
-  // ============================
-  // CHECK & CONVERT 30-DAY COMPLETED CYCLES
-  // ============================
-  private async checkAndConvertCompletedCycles() {
-    const completedCycles = await this.cycleModel.find({
-      status: 'active',
-      currentDay: { $gte: this.CYCLE_DAYS },
-    });
-
-    for (const cycle of completedCycles) {
-      // Mark as completed permanently in the draw
-      cycle.status = 'completed';
-      cycle.isPermanent = true;
-      cycle.permanentPrizeAmount = 30000; // After 30 days, eligible for 30000
-      await cycle.save();
-
-      // Credit savings back to user
-      await this.walletService.credit(cycle.userId, cycle.totalSavings);
-
-      // Notify user
-      await this.createNotification(
-        cycle.userId,
-        '🎊 30-Day Cycle Complete!',
-        `Your savings of PKR ${cycle.totalSavings} have been credited to your wallet. Your coupon ${cycle.couponNumber} is now permanently in the draw for PKR 30,000!`,
-        'SAVINGS',
-      );
-    }
-  }
-
-  // ============================
-  // MANUAL DRAW (for testing / admin)
-  // ============================
   async triggerManualDraw() {
     return this.executeLuckyDraw();
   }
 
-  // ============================
-  // GET DRAW HISTORY
-  // ============================
   async getDrawHistory(limit = 20) {
     return this.drawModel.find().sort({ drawDate: -1 }).limit(limit);
   }
 
-  // ============================
-  // GET WINNING HISTORY FOR USER
-  // ============================
   async getWinningHistory(userId: string) {
     const draws = await this.drawModel.find({ winnerUserId: userId }).sort({ drawDate: -1 });
-    const totalWon = draws.reduce((sum, d) => sum + d.prizeAmount, 0);
+    const totalWon = draws.reduce((sum, draw) => sum + draw.prizeAmount, 0);
     return { wins: draws, totalWon, totalWins: draws.length };
   }
 
-  // ============================
-  // GET NEXT DRAW INFO
-  // ============================
   async getNextDrawInfo() {
     const lastDraw = await this.drawModel.findOne().sort({ drawDate: -1 });
-    const totalParticipants = await this.cycleModel.countDocuments({
-      $or: [{ status: 'active' }, { isPermanent: true, status: 'completed' }],
-    });
-
+    const totalParticipants = await this.cycleModel.countDocuments({ queuedForNextRound: true });
     const now = new Date();
     let nextDrawTime: Date;
     let drawNumber: number;
 
     if (!lastDraw) {
-      // No draws yet — align to the next whole minute boundary
       nextDrawTime = new Date(now);
       nextDrawTime.setSeconds(0, 0);
       nextDrawTime.setMinutes(now.getMinutes() + 1);
       drawNumber = 1;
     } else {
-      // Next draw is exactly 60 seconds after the last draw
       nextDrawTime = new Date(lastDraw.drawDate.getTime() + 60000);
       drawNumber = lastDraw.drawNumber + 1;
     }
@@ -485,60 +657,63 @@ export class GameService {
         ? {
             drawNumber: lastDraw.drawNumber,
             winningNumber: lastDraw.winningNumber,
-            hasWinner: !!lastDraw.winnerUserId,
+            hasWinner: Boolean(lastDraw.winnerUserId),
             winnerCoupon: lastDraw.winnerCoupon,
             prizeAmount: lastDraw.prizeAmount,
             drawDate: lastDraw.drawDate,
+            winnerTokenId: (lastDraw as any).winnerTokenId || null,
           }
         : null,
     };
   }
 
-  // ============================
-  // GET DASHBOARD STATS
-  // ============================
   async getDashboardStats(userId: string) {
-    const activeCycle = await this.cycleModel.findOne({ userId, status: 'active' });
-    const allCycles = await this.cycleModel.find({ userId });
-    const totalPayments = await this.paymentModel.countDocuments({ userId });
-    const wins = await this.drawModel.find({ winnerUserId: userId });
-    const totalWinnings = wins.reduce((sum, d) => sum + d.prizeAmount, 0);
+    const now = new Date();
+    const tokens = await this.cycleModel.find({ userId }).sort({ createdAt: -1 });
     const walletBalance = await this.walletService.getBalance(userId);
-    const totalParticipants = await this.cycleModel.countDocuments({
-      $or: [{ status: 'active' }, { isPermanent: true, status: 'completed' }],
-    });
+    const wins = await this.drawModel.find({ winnerUserId: userId });
+    const totalWinnings = wins.reduce((sum, draw) => sum + draw.prizeAmount, 0);
+    const totalInvested = tokens.reduce((sum, token) => sum + this.getTokenInvestedValue(token), 0);
+    const queuedTokens = tokens.filter((token) => this.isQueued(token));
+    const eligibleTokens = tokens.filter((token) => this.canParticipateToday(token, now));
+    const activeToken = queuedTokens[0] || eligibleTokens[0] || tokens[0] || null;
+    const nextEligiblePlayDate = tokens
+      .map((token) => this.getNextEligiblePlayDateForToken(token, now))
+      .sort((a, b) => a.getTime() - b.getTime())[0] || null;
 
     return {
       walletBalance,
-      totalSavings: activeCycle ? activeCycle.totalSavings : 0,
+      totalInvested,
+      totalSavings: totalInvested,
       totalWinnings,
-      totalCycles: allCycles.length,
-      totalPayments,
+      totalCycles: tokens.length,
+      totalPayments: await this.paymentModel.countDocuments({ userId, action: 'investment' } as any),
       totalWins: wins.length,
-      totalParticipants,
-      activeCycle: activeCycle
-        ? {
-            couponNumber: activeCycle.couponNumber,
-            currentDay: activeCycle.currentDay,
-            daysLeft: this.CYCLE_DAYS - activeCycle.currentDay,
-            totalSavings: activeCycle.totalSavings,
-            prizeIfWinToday: this.getPrizeForDay(activeCycle.currentDay),
-            canPayToday: this.canPayToday(activeCycle),
-          }
-        : null,
-      permanentCoupons: allCycles
-        .filter((c) => c.isPermanent)
-        .map((c) => ({
-          couponNumber: c.couponNumber,
-          prizeAmount: c.permanentPrizeAmount,
+      totalLosses: tokens.reduce((sum, token) => sum + Number((token as any).totalLosses || 0), 0),
+      totalParticipants: await this.cycleModel.countDocuments({ queuedForNextRound: true }),
+      activeCycle: activeToken ? this.buildTokenView(activeToken, now) : null,
+      nextEligiblePlayDate,
+      eligibleTokens: eligibleTokens.map((token) => this.buildTokenView(token, now)),
+      queuedTokens: queuedTokens.map((token) => this.buildTokenView(token, now)),
+      tokens: tokens.map((token) => this.buildTokenView(token, now)),
+      permanentCoupons: tokens
+        .filter((token) => this.isPermanentToken(token))
+        .map((token) => ({
+          tokenNumber: (token as any).tokenNumber || token.couponNumber,
+          couponNumber: token.couponNumber,
+          prizeAmount: this.getTokenRewardValue(token),
+          totalInvested: this.getTokenInvestedValue(token),
         })),
     };
   }
 
-  // ============================
-  // NOTIFICATIONS
-  // ============================
-  private async createNotification(userId: string, title: string, description: string, category: string) {
+  private async createNotification(
+    userId: string,
+    title: string,
+    description: string,
+    category: string,
+    session?: ClientSession,
+  ) {
     const notification = new this.notificationModel({
       userId,
       title,
@@ -546,7 +721,7 @@ export class GameService {
       category,
       isRead: false,
     });
-    return notification.save();
+    return notification.save({ session });
   }
 
   async getNotifications(userId: string, limit = 50) {

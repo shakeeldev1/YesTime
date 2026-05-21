@@ -18,19 +18,15 @@
       "method": "POST",
       "url": "/auth/signup",
       "authRequired": false,
-      "description": "Multipart form - signup with optional files",
-      "contentType": "multipart/form-data",
-      "multipartFields": ["cnicFront (file)", "cnicBack (file)"],
+      "description": "JSON signup with CNIC number and strong password rules",
+      "contentType": "application/json",
       "bodyDto": "server/src/auth/dto/signup.dto.ts",
       "requiredFields": [
         { "name": "name", "type": "string" },
         { "name": "email", "type": "string (email)" },
         { "name": "phone", "type": "string" },
-        { "name": "password", "type": "string" }
-      ],
-      "optionalFields": [
-        { "name": "cnicFront (file)", "type": "file" },
-        { "name": "cnicBack (file)", "type": "file" }
+        { "name": "password", "type": "string" },
+        { "name": "cnicNumber", "type": "string (13 digits)" }
       ]
     },
 
@@ -43,7 +39,28 @@
     { "name": "Select Role", "method": "POST", "url": "/auth/select-role", "authRequired": true, "body": { "role": "string", "shopName?": "string", "shopLocation?": "string", "shopType?": "string", "shopDescription?": "string" }, "requiredFields": ["role"] },
 
     { "name": "Get My Balance", "method": "GET", "url": "/wallet/my-balance", "authRequired": true },
-    { "name": "Add Balance (Top-up)", "method": "POST", "url": "/wallet/add-balance", "authRequired": true, "body": { "amount": "number (PKR, >0, <=100000)" }, "requiredFields": ["amount"] },
+    {
+      "name": "Add Balance (Manual Request)",
+      "method": "POST",
+      "url": "/wallet/add-balance",
+      "authRequired": true,
+      "contentType": "multipart/form-data",
+      "multipartFields": ["paymentScreenshot (file)"],
+      "body": {
+        "amount": "number (PKR, >0, <=100000)",
+        "paymentMethod": "string",
+        "senderName": "string",
+        "bankName?": "string",
+        "transactionReference?": "string",
+        "note?": "string"
+      },
+      "requiredFields": ["amount", "paymentMethod", "senderName", "paymentScreenshot"],
+      "responseNotes": "Creates a pending payment request. Admin approval is required before the wallet is credited."
+    },
+    { "name": "My Deposit Requests", "method": "GET", "url": "/wallet/deposit-requests/my", "authRequired": true },
+    { "name": "Pending Deposit Requests (Admin)", "method": "GET", "url": "/wallet/deposit-requests/pending", "authRequired": true, "role": "admin" },
+    { "name": "Approve Deposit Request (Admin)", "method": "POST", "url": "/wallet/deposit-requests/:requestId/approve", "authRequired": true, "role": "admin", "params": { "requestId": "string (MongoId)" } },
+    { "name": "Reject Deposit Request (Admin)", "method": "POST", "url": "/wallet/deposit-requests/:requestId/reject", "authRequired": true, "role": "admin", "params": { "requestId": "string (MongoId)" }, "body": { "reason?": "string" } },
     { "name": "My Transactions", "method": "GET", "url": "/wallet/my-transactions", "authRequired": true, "query": "See server/src/wallet/dto/transaction.dto.ts for filters" },
 
     { "name": "Join Car Participation", "method": "POST", "url": "/car-participation/join", "authRequired": true, "body": { "referredByUserId?": "string" } },
@@ -82,8 +99,16 @@
     { "name": "Lottery Mark All Read", "method": "POST", "url": "/registration-lottery/notifications/mark-all-read", "authRequired": true },
     { "name": "Lottery Delete Notification", "method": "DELETE", "url": "/registration-lottery/notifications/:id", "authRequired": true, "params": { "id": "string" } },
 
-    { "name": "Game Join", "method": "POST", "url": "/game/join", "authRequired": true },
-    { "name": "Game Daily Payment", "method": "POST", "url": "/game/daily-payment", "authRequired": true },
+    {
+      "name": "Game Join / Invest",
+      "method": "POST",
+      "url": "/game/join",
+      "authRequired": true,
+      "description": "Invest PKR 50 to create or upgrade the current date-based token"
+    },
+    { "name": "Game Play Now", "method": "POST", "url": "/game/play-now", "authRequired": true, "body": { "tokenId?": "string (MongoId)" } },
+    { "name": "Game Auto Join Next Round", "method": "POST", "url": "/game/auto-join-next-round", "authRequired": true, "body": { "tokenId?": "string (MongoId)" } },
+    { "name": "Game Daily Payment (Legacy Alias)", "method": "POST", "url": "/game/daily-payment", "authRequired": true, "body": { "tokenId?": "string (MongoId)" }, "description": "Compatibility alias for Play Now" },
     { "name": "Game Active Cycle", "method": "GET", "url": "/game/active-cycle", "authRequired": true },
     { "name": "Game Savings", "method": "GET", "url": "/game/savings", "authRequired": true },
     { "name": "Game Coupons", "method": "GET", "url": "/game/coupons", "authRequired": true },

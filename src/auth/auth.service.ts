@@ -3,7 +3,6 @@ import { UsersService } from 'src/users/users.service';
 import { SignupDto } from './dto/signup.dto';
 import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcryptjs';
-import { CloudinaryService } from 'src/cloudinary/cloudinary.service';
 import { MailerService } from 'src/mailer/mailer.service';
 import { CashbackService } from 'src/cashback/cashback.service';
 
@@ -12,15 +11,11 @@ export class AuthService {
     constructor(
         private userService: UsersService, 
         private jwtService: JwtService,
-        private cloudinaryService: CloudinaryService,
         private mailerService: MailerService,
         private cashbackService: CashbackService,
     ) { }
 
-    async signup(
-        dto: SignupDto, 
-        files?: { cnicFront?: Express.Multer.File[], cnicBack?: Express.Multer.File[] }
-    ) {
+    async signup(dto: SignupDto) {
         const existingEmailUser = await this.userService.findByEmail(dto.email);
 
         if (existingEmailUser) {
@@ -30,27 +25,12 @@ export class AuthService {
         const hashedPassword = await bcrypt.hash(dto.password, 10);
         const otp = await this.generateOtp();
         
-        let cnicFrontUrl: string | undefined;
-        let cnicBackUrl: string | undefined;
-        
-        if (files?.cnicFront?.[0]) {
-            const cnicFrontResult = await this.cloudinaryService.uploadImage(files.cnicFront[0], 'yes-time/cnic');
-            cnicFrontUrl = cnicFrontResult.secure_url;
-        }
-        
-        if (files?.cnicBack?.[0]) {
-            const cnicBackResult = await this.cloudinaryService.uploadImage(files.cnicBack[0], 'yes-time/cnic');
-            cnicBackUrl = cnicBackResult.secure_url;
-        }
-        
         let user;
         try {
             user = await this.userService.createUser({
                 ...dto,
                 password: hashedPassword,
                 otp: otp,
-                cnicFrontImage: cnicFrontUrl,
-                cnicBackImage: cnicBackUrl
             });
         } catch (error: any) {
             if (error?.code === 11000) {
