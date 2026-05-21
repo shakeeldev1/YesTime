@@ -17,6 +17,9 @@ export class RegistrationLottery extends Document {
 
   @Prop({ default: 0 })
   winCount!: number;
+
+  @Prop()
+  lastPlayedAt?: Date;
 }
 
 export const RegistrationLotterySchema = SchemaFactory.createForClass(RegistrationLottery);

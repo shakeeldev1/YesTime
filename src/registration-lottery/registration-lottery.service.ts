@@ -33,10 +33,33 @@ export class RegistrationLotteryService {
     return String(Math.floor(100000 + Math.random() * 900000));
   }
 
+  private isSameDay(firstDate: Date, secondDate: Date): boolean {
+    return (
+      firstDate.getFullYear() === secondDate.getFullYear() &&
+      firstDate.getMonth() === secondDate.getMonth() &&
+      firstDate.getDate() === secondDate.getDate()
+    );
+  }
+
+  private getNextEligiblePlayAt(lastPlayedAt?: Date | null): Date | null {
+    if (!lastPlayedAt) {
+      return null;
+    }
+
+    const nextEligibleAt = new Date(lastPlayedAt);
+    nextEligibleAt.setHours(24, 0, 0, 0);
+    return nextEligibleAt;
+  }
+
   // Pay registration fee and get permanent coupon
   async payRegistrationFee(userId: string) {
     const user = await this.usersService.findById(userId);
     if (!user) throw new NotFoundException('User not found');
+
+    const now = new Date();
+    const latestLottery = await this.lotteryModel
+      .findOne({ userId: new Types.ObjectId(userId) })
+      .sort({ createdAt: -1 });
 
     // Only one active entry is allowed at a time.
     const existingActive = await this.lotteryModel.findOne({
@@ -45,6 +68,10 @@ export class RegistrationLotteryService {
     });
     if (existingActive) {
       throw new BadRequestException('You are already entered for the current lottery round.');
+    }
+
+    if (latestLottery?.lastPlayedAt && this.isSameDay(latestLottery.lastPlayedAt, now)) {
+      throw new BadRequestException('You have already paid today. Come back tomorrow!');
     }
 
     // Check wallet balance
@@ -71,6 +98,7 @@ export class RegistrationLotteryService {
       isActive: true,
       totalWinnings: 0,
       winCount: 0,
+      lastPlayedAt: now,
     });
     await lottery.save();
 
@@ -102,6 +130,8 @@ export class RegistrationLotteryService {
       message: 'You are entered for the next draw.',
       couponNumber: coupon,
       prizePerWin: this.PRIZE_AMOUNT,
+      canPlayToday: false,
+      nextEligiblePlayAt: this.getNextEligiblePlayAt(now),
     };
   }
 
@@ -110,18 +140,24 @@ export class RegistrationLotteryService {
     const lottery = await this.lotteryModel
       .findOne({ userId: new Types.ObjectId(userId) })
       .sort({ createdAt: -1 });
+
     if (!lottery) {
-      return { hasPaid: false, lottery: null };
+      return { hasPaid: false, canPlayToday: true, nextEligiblePlayAt: null, lottery: null };
     }
+
+    const canPlayToday = !(lottery.lastPlayedAt && this.isSameDay(lottery.lastPlayedAt, new Date()));
 
     return {
       hasPaid: Boolean(lottery.isActive),
+      canPlayToday,
+      nextEligiblePlayAt: canPlayToday ? null : this.getNextEligiblePlayAt(lottery.lastPlayedAt),
       lottery: {
         id: lottery._id,
         couponNumber: lottery.couponNumber,
         isActive: lottery.isActive,
         totalWinnings: lottery.totalWinnings,
         winCount: lottery.winCount,
+        lastPlayedAt: lottery.lastPlayedAt,
       },
     };
   }
@@ -228,14 +264,20 @@ export class RegistrationLotteryService {
     const lottery = await this.lotteryModel
       .findOne({ userId: new Types.ObjectId(userId), isActive: true })
       .sort({ createdAt: -1 });
+    const latestLottery = await this.lotteryModel
+      .findOne({ userId: new Types.ObjectId(userId) })
+      .sort({ createdAt: -1 });
     const walletBalance = await this.walletService.getBalance(userId);
     const totalParticipants = await this.lotteryModel.countDocuments({ isActive: true });
     const wins = await this.drawModel.find({ winnerUserId: userId }).sort({ drawDate: -1 });
     const totalWinnings = wins.reduce((sum, d) => sum + d.prizeAmount, 0);
+    const canPlayToday = !(latestLottery?.lastPlayedAt && this.isSameDay(latestLottery.lastPlayedAt, new Date()));
 
     return {
       walletBalance,
       hasPaid: Boolean(lottery),
+      canPlayToday,
+      nextEligiblePlayAt: canPlayToday ? null : this.getNextEligiblePlayAt(latestLottery?.lastPlayedAt),
       couponNumber: lottery?.couponNumber || null,
       totalWinnings,
       winCount: lottery?.winCount || 0,
