@@ -51,27 +51,16 @@ export class RegistrationLotteryService {
     return nextEligibleAt;
   }
 
-  // Pay registration fee and get permanent coupon
+  // Pay the one-time registration fee and unlock daily play.
   async payRegistrationFee(userId: string) {
     const user = await this.usersService.findById(userId);
     if (!user) throw new NotFoundException('User not found');
 
-    const now = new Date();
-    const latestLottery = await this.lotteryModel
-      .findOne({ userId: new Types.ObjectId(userId) })
-      .sort({ createdAt: -1 });
-
-    // Only one active entry is allowed at a time.
-    const existingActive = await this.lotteryModel.findOne({
-      userId: new Types.ObjectId(userId),
-      isActive: true,
-    });
-    if (existingActive) {
-      throw new BadRequestException('You are already entered for the current lottery round.');
-    }
-
-    if (latestLottery?.lastPlayedAt && this.isSameDay(latestLottery.lastPlayedAt, now)) {
-      throw new BadRequestException('You have already paid today. Come back tomorrow!');
+    if (user.registrationFeePaid) {
+      return {
+        message: 'Registration is already activated. You can play daily.',
+        registrationFeePaid: true,
+      };
     }
 
     // Check wallet balance
@@ -85,13 +74,58 @@ export class RegistrationLotteryService {
     // Debit wallet
     await this.walletService.debit(userId, this.REGISTRATION_FEE);
 
-    // Generate unique coupon
+    // Update user
+    await this.usersService.updateProfile(userId, {
+      registrationFeePaid: true,
+      registrationCoupon: undefined,
+    } as any);
+
+    // Notification
+    await this.createNotification(
+      userId,
+      'Registration activated',
+      `PKR ${this.REGISTRATION_FEE} deducted. You can now play the lottery once per day.`,
+      'REGISTRATION',
+    );
+
+    return {
+      message: 'Registration activated. You can now play once per day.',
+      registrationFeePaid: true,
+    };
+  }
+
+  // Play today's lottery round after registration has been activated.
+  async playDailyLottery(userId: string) {
+    const user = await this.usersService.findById(userId);
+    if (!user) throw new NotFoundException('User not found');
+
+    if (!user.registrationFeePaid) {
+      throw new BadRequestException('Please pay the one-time registration fee first.');
+    }
+
+    const now = new Date();
+    const latestLottery = await this.lotteryModel
+      .findOne({ userId: new Types.ObjectId(userId) })
+      .sort({ createdAt: -1 });
+
+    if (latestLottery?.lastPlayedAt && this.isSameDay(latestLottery.lastPlayedAt, now)) {
+      throw new BadRequestException('You have already played today. Come back tomorrow!');
+    }
+
+    const existingActive = await this.lotteryModel.findOne({
+      userId: new Types.ObjectId(userId),
+      isActive: true,
+    });
+    if (existingActive) {
+      throw new BadRequestException('You have already played today. Come back tomorrow!');
+    }
+
+    // Generate unique daily coupon.
     let coupon = this.generateCoupon();
     while (await this.lotteryModel.findOne({ couponNumber: coupon })) {
       coupon = this.generateCoupon();
     }
 
-    // Create a fresh entry for this round.
     const lottery = new this.lotteryModel({
       userId: new Types.ObjectId(userId),
       couponNumber: coupon,
@@ -102,34 +136,20 @@ export class RegistrationLotteryService {
     });
     await lottery.save();
 
-    // Update user
     await this.usersService.updateProfile(userId, {
-      registrationFeePaid: true,
       registrationCoupon: coupon,
     } as any);
 
-    // Generate referral code if not already present
-    const fullUser = await this.usersService.findById(userId);
-    if (!fullUser?.referralCode) {
-      const referralCode = await this.usersService.generateUniqueReferralCode();
-      await this.usersService.updateProfile(userId, { referralCode } as any);
-    }
-
-    // Send email
-    await this.mailerService.sendRegistrationCouponEmail(user.email, user.name, coupon);
-
-    // Notification
     await this.createNotification(
       userId,
-      'Lottery entry confirmed',
-      `PKR ${this.REGISTRATION_FEE} deducted. Your ticket ${coupon} is active for this round only.`,
+      'Daily lottery entry confirmed',
+      `Your coupon ${coupon} is active for today's draw.`,
       'REGISTRATION',
     );
 
     return {
-      message: 'You are entered for the next draw.',
+      message: 'Your coupon is active for today. Wait for the next draw result.',
       couponNumber: coupon,
-      prizePerWin: this.PRIZE_AMOUNT,
       canPlayToday: false,
       nextEligiblePlayAt: this.getNextEligiblePlayAt(now),
     };
@@ -137,28 +157,28 @@ export class RegistrationLotteryService {
 
   // Get my lottery info
   async getMyLotteryInfo(userId: string) {
+    const user = await this.usersService.findById(userId);
     const lottery = await this.lotteryModel
       .findOne({ userId: new Types.ObjectId(userId) })
       .sort({ createdAt: -1 });
 
-    if (!lottery) {
-      return { hasPaid: false, canPlayToday: true, nextEligiblePlayAt: null, lottery: null };
-    }
-
-    const canPlayToday = !(lottery.lastPlayedAt && this.isSameDay(lottery.lastPlayedAt, new Date()));
+    const membershipPaid = Boolean(user?.registrationFeePaid);
+    const canPlayToday = membershipPaid && !(lottery?.lastPlayedAt && this.isSameDay(lottery.lastPlayedAt, new Date()));
+    const activeLottery = canPlayToday ? null : lottery;
 
     return {
-      hasPaid: Boolean(lottery.isActive),
+      hasPaid: membershipPaid,
+      membershipPaid,
       canPlayToday,
-      nextEligiblePlayAt: canPlayToday ? null : this.getNextEligiblePlayAt(lottery.lastPlayedAt),
-      lottery: {
-        id: lottery._id,
-        couponNumber: lottery.couponNumber,
-        isActive: lottery.isActive,
-        totalWinnings: lottery.totalWinnings,
-        winCount: lottery.winCount,
-        lastPlayedAt: lottery.lastPlayedAt,
-      },
+      nextEligiblePlayAt: canPlayToday ? null : this.getNextEligiblePlayAt(lottery?.lastPlayedAt),
+      lottery: activeLottery ? {
+        id: activeLottery._id,
+        couponNumber: activeLottery.couponNumber,
+        isActive: activeLottery.isActive,
+        totalWinnings: activeLottery.totalWinnings,
+        winCount: activeLottery.winCount,
+        lastPlayedAt: activeLottery.lastPlayedAt,
+      } : null,
     };
   }
 
@@ -261,6 +281,7 @@ export class RegistrationLotteryService {
 
   // Dashboard stats
   async getDashboardStats(userId: string) {
+    const user = await this.usersService.findById(userId);
     const lottery = await this.lotteryModel
       .findOne({ userId: new Types.ObjectId(userId), isActive: true })
       .sort({ createdAt: -1 });
@@ -271,11 +292,13 @@ export class RegistrationLotteryService {
     const totalParticipants = await this.lotteryModel.countDocuments({ isActive: true });
     const wins = await this.drawModel.find({ winnerUserId: userId }).sort({ drawDate: -1 });
     const totalWinnings = wins.reduce((sum, d) => sum + d.prizeAmount, 0);
-    const canPlayToday = !(latestLottery?.lastPlayedAt && this.isSameDay(latestLottery.lastPlayedAt, new Date()));
+    const membershipPaid = Boolean(user?.registrationFeePaid);
+    const canPlayToday = membershipPaid && !(latestLottery?.lastPlayedAt && this.isSameDay(latestLottery.lastPlayedAt, new Date()));
 
     return {
       walletBalance,
-      hasPaid: Boolean(lottery),
+      hasPaid: membershipPaid,
+      membershipPaid,
       canPlayToday,
       nextEligiblePlayAt: canPlayToday ? null : this.getNextEligiblePlayAt(latestLottery?.lastPlayedAt),
       couponNumber: lottery?.couponNumber || null,

@@ -22,6 +22,12 @@ export class RegistrationLotteryController {
   }
 
   @UseGuards(JwtAuthGuard)
+  @Post('play')
+  async playDailyLottery(@Request() req) {
+    return this.service.playDailyLottery(req.user.userId);
+  }
+
+  @UseGuards(JwtAuthGuard)
   @Get('my-info')
   async getMyLotteryInfo(@Request() req) {
     return this.service.getMyLotteryInfo(req.user.userId);
