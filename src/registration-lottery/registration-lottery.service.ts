@@ -38,10 +38,13 @@ export class RegistrationLotteryService {
     const user = await this.usersService.findById(userId);
     if (!user) throw new NotFoundException('User not found');
 
-    // Check if already paid
-    const existing = await this.lotteryModel.findOne({ userId: new Types.ObjectId(userId) });
-    if (existing) {
-      throw new BadRequestException('Registration fee already paid. Your coupon: ' + existing.couponNumber);
+    // Only one active entry is allowed at a time.
+    const existingActive = await this.lotteryModel.findOne({
+      userId: new Types.ObjectId(userId),
+      isActive: true,
+    });
+    if (existingActive) {
+      throw new BadRequestException('You are already entered for the current lottery round.');
     }
 
     // Check wallet balance
@@ -61,11 +64,13 @@ export class RegistrationLotteryService {
       coupon = this.generateCoupon();
     }
 
-    // Create lottery entry
+    // Create a fresh entry for this round.
     const lottery = new this.lotteryModel({
       userId: new Types.ObjectId(userId),
       couponNumber: coupon,
       isActive: true,
+      totalWinnings: 0,
+      winCount: 0,
     });
     await lottery.save();
 
@@ -88,13 +93,13 @@ export class RegistrationLotteryService {
     // Notification
     await this.createNotification(
       userId,
-      'Registration Fee Paid!',
-      `PKR ${this.REGISTRATION_FEE} deducted. Your permanent coupon: ${coupon}. You're now in every registration lottery draw for PKR ${this.PRIZE_AMOUNT} each time!`,
+      'Lottery entry confirmed',
+      `PKR ${this.REGISTRATION_FEE} deducted. Your ticket ${coupon} is active for this round only.`,
       'REGISTRATION',
     );
 
     return {
-      message: 'Registration fee paid successfully!',
+      message: 'You are entered for the next draw.',
       couponNumber: coupon,
       prizePerWin: this.PRIZE_AMOUNT,
     };
@@ -102,13 +107,15 @@ export class RegistrationLotteryService {
 
   // Get my lottery info
   async getMyLotteryInfo(userId: string) {
-    const lottery = await this.lotteryModel.findOne({ userId: new Types.ObjectId(userId) });
+    const lottery = await this.lotteryModel
+      .findOne({ userId: new Types.ObjectId(userId) })
+      .sort({ createdAt: -1 });
     if (!lottery) {
       return { hasPaid: false, lottery: null };
     }
 
     return {
-      hasPaid: true,
+      hasPaid: Boolean(lottery.isActive),
       lottery: {
         id: lottery._id,
         couponNumber: lottery.couponNumber,
@@ -171,6 +178,25 @@ export class RegistrationLotteryService {
       );
     }
 
+    for (const lottery of activeLotteries) {
+      if (winner && lottery._id.toString() === winner._id.toString()) {
+        continue;
+      }
+
+      await this.createNotification(
+        lottery.userId.toString(),
+        'Try again next round',
+        `Your ticket ${lottery.couponNumber} was not selected this time. Try again in the next draw.`,
+        'REGISTRATION',
+      );
+    }
+
+    // One-time entry: mark all current round tickets as inactive after the draw.
+    await this.lotteryModel.updateMany(
+      { _id: { $in: activeLotteries.map((lottery) => lottery._id) } },
+      { $set: { isActive: false } },
+    );
+
     // Record draw
     const draw = new this.drawModel({
       drawNumber,
@@ -199,7 +225,9 @@ export class RegistrationLotteryService {
 
   // Dashboard stats
   async getDashboardStats(userId: string) {
-    const lottery = await this.lotteryModel.findOne({ userId: new Types.ObjectId(userId) });
+    const lottery = await this.lotteryModel
+      .findOne({ userId: new Types.ObjectId(userId), isActive: true })
+      .sort({ createdAt: -1 });
     const walletBalance = await this.walletService.getBalance(userId);
     const totalParticipants = await this.lotteryModel.countDocuments({ isActive: true });
     const wins = await this.drawModel.find({ winnerUserId: userId }).sort({ drawDate: -1 });
@@ -207,7 +235,7 @@ export class RegistrationLotteryService {
 
     return {
       walletBalance,
-      hasPaid: !!lottery,
+      hasPaid: Boolean(lottery),
       couponNumber: lottery?.couponNumber || null,
       totalWinnings,
       winCount: lottery?.winCount || 0,
