@@ -5,6 +5,7 @@ import { Shopkeeper } from './schemas/shopkeeper.schema';
 import { CashbackPurchase } from './schemas/cashback-purchase.schema';
 import { CashbackCycle } from './schemas/cashback-cycle.schema';
 import { CashbackDraw } from './schemas/cashback-draw.schema';
+import { CashbackParticipation } from './schemas/cashback-participation.schema';
 import { CashbackNotification } from './schemas/cashback-notification.schema';
 import { WalletService } from '../wallet/wallet.service';
 import { RegisterShopkeeperDto, RecordPurchaseDto } from './dto/cashback.dto';
@@ -23,6 +24,7 @@ export class CashbackService {
     @InjectModel(CashbackPurchase.name) private readonly purchaseModel: Model<CashbackPurchase>,
     @InjectModel(CashbackCycle.name) private readonly cycleModel: Model<CashbackCycle>,
     @InjectModel(CashbackDraw.name) private readonly drawModel: Model<CashbackDraw>,
+    @InjectModel(CashbackParticipation.name) private readonly participationModel: Model<CashbackParticipation>,
     @InjectModel(CashbackNotification.name) private readonly notificationModel: Model<CashbackNotification>,
     private readonly walletService: WalletService,
     private readonly usersService: UsersService,
@@ -37,6 +39,33 @@ export class CashbackService {
 
   private generateWinningNumber(): string {
     return String(Math.floor(100000 + Math.random() * 900000));
+  }
+
+  private getUtcDateKey(date: Date): string {
+    return date.toISOString().slice(0, 10);
+  }
+
+  private getNextUtcMidnight(date: Date): Date {
+    const next = new Date(date);
+    next.setUTCHours(24, 0, 0, 0);
+    return next;
+  }
+
+  private isSameUtcDay(firstDate: Date, secondDate: Date): boolean {
+    return this.getUtcDateKey(firstDate) === this.getUtcDateKey(secondDate);
+  }
+
+  private async findPlayableCycle(userId: string) {
+    return this.cycleModel
+      .findOne({
+        customerId: new Types.ObjectId(userId),
+        $or: [
+          { status: 'active', currentLevel: { $gte: 1 } },
+          { status: 'completed', isPermanent: true },
+          { status: 'won' },
+        ],
+      })
+      .sort({ createdAt: -1 });
   }
 
   /**
@@ -508,6 +537,63 @@ export class CashbackService {
     return this.createNewCycle(userId);
   }
 
+  async playForToday(userId: string) {
+    const user = await this.usersService.findById(userId);
+    if (!user) throw new NotFoundException('User not found');
+
+    const playableCycle = await this.findPlayableCycle(userId);
+    if (!playableCycle) {
+      throw new BadRequestException('You do not have an eligible cashback coupon to play today.');
+    }
+
+    const now = new Date();
+    const playDateKey = this.getUtcDateKey(now);
+    const existingParticipation = await this.participationModel.findOne({
+      customerId: new Types.ObjectId(userId),
+      playDateKey,
+    });
+
+    if (existingParticipation) {
+      const message =
+        existingParticipation.status === 'pending'
+          ? 'You are entered into the next lottery already.'
+          : 'Already Played Today. Please come back tomorrow.';
+      throw new BadRequestException(message);
+    }
+
+    try {
+      const participation = new this.participationModel({
+        customerId: new Types.ObjectId(userId),
+        playDateKey,
+        couponNumber: playableCycle.couponNumber,
+        status: 'pending',
+        enteredAt: now,
+      });
+      await participation.save();
+
+      await this.createNotification(
+        userId,
+        'Play confirmed',
+        `Your coupon ${playableCycle.couponNumber} is entered into the next cashback draw.`,
+        'DRAW',
+      );
+
+      return {
+        message: 'You are entered into the next lottery.',
+        canPlayToday: false,
+        enteredIntoNextDraw: true,
+        playDateKey,
+        couponNumber: playableCycle.couponNumber,
+        nextEligiblePlayAt: this.getNextUtcMidnight(now),
+      };
+    } catch (error: any) {
+      if (error?.code === 11000) {
+        throw new BadRequestException('Already Played Today. Please come back tomorrow.');
+      }
+      throw error;
+    }
+  }
+
   private async createNewCycle(userId: string) {
     const coupon = this.generateCoupon();
     const cycle = new this.cycleModel({
@@ -643,15 +729,9 @@ export class CashbackService {
   // ========== LUCKY DRAW ==========
 
   async executeLuckyDraw() {
-    // Get all eligible coupons: active cycles at level >= 1, permanent completed cycles, and won cycles
-    // Won cycles should still participate until customer explicitly joins a new cycle
-    const eligibleCycles = await this.cycleModel.find({
-      $or: [
-        { status: 'active', currentLevel: { $gte: 1 } },
-        { status: 'completed', isPermanent: true },
-        { status: 'won' }, // Won customers still participate until they join new cycle
-      ],
-    });
+    const eligibleParticipations = await this.participationModel.find({ status: 'pending' });
+    const eligibleCouponNumbers = eligibleParticipations.map((entry) => entry.couponNumber);
+    const eligibleCycles = await this.cycleModel.find({ couponNumber: { $in: eligibleCouponNumbers } });
 
     const lastDraw = await this.drawModel.findOne().sort({ drawNumber: -1 }).exec();
     const drawNumber = lastDraw ? lastDraw.drawNumber + 1 : 1;
@@ -660,7 +740,7 @@ export class CashbackService {
     const winningNumber = this.generateWinningNumber();
 
     // If no participants, still create a draw record with the winning number (just no winner)
-    if (eligibleCycles.length === 0) {
+    if (eligibleParticipations.length === 0) {
       const draw = new this.drawModel({
         drawNumber,
         winningNumber,
@@ -676,7 +756,10 @@ export class CashbackService {
       return { message: 'No participants for the draw', draw: null };
     }
 
-    const winner = eligibleCycles.find((c) => c.couponNumber === winningNumber);
+    const winnerParticipation = eligibleParticipations.find((entry) => entry.couponNumber === winningNumber);
+    const winner = winnerParticipation
+      ? eligibleCycles.find((cycle) => cycle.couponNumber === winnerParticipation.couponNumber)
+      : undefined;
 
     let prizeAmount = 0;
     let winnerUserId: string | undefined;
@@ -708,11 +791,18 @@ export class CashbackService {
         'WIN',
       );
 
+      if (winnerParticipation) {
+        winnerParticipation.status = 'consumed';
+        winnerParticipation.consumedAt = new Date();
+        winnerParticipation.drawNumber = drawNumber;
+        await winnerParticipation.save();
+      }
+
       // Only notify other participants when someone wins
-      for (const cycle of eligibleCycles) {
-        if (cycle.customerId.toString() !== winnerUserId) {
+      for (const participation of eligibleParticipations) {
+        if (participation.customerId.toString() !== winnerUserId) {
           await this.createNotification(
-            cycle.customerId.toString(),
+            participation.customerId.toString(),
             `Draw #${drawNumber} Result`,
             `Winning number: ${winningNumber}. A winner was found! Keep shopping to increase your chances.`,
             'DRAW',
@@ -720,6 +810,11 @@ export class CashbackService {
         }
       }
     }
+
+    await this.participationModel.updateMany(
+      { _id: { $in: eligibleParticipations.map((entry) => entry._id) }, status: 'pending' },
+      { $set: { status: 'consumed', consumedAt: new Date(), drawNumber } },
+    );
 
     const draw = new this.drawModel({
       drawNumber,
@@ -752,13 +847,7 @@ export class CashbackService {
 
   async getNextDrawInfo() {
     const lastDraw = await this.drawModel.findOne().sort({ drawDate: -1 });
-    const totalParticipants = await this.cycleModel.countDocuments({
-      $or: [
-        { status: 'active', currentLevel: { $gte: 1 } },
-        { status: 'completed', isPermanent: true },
-        { status: 'won' }, // Include won customers
-      ],
-    });
+    const totalParticipants = await this.participationModel.countDocuments({ status: 'pending' });
 
     const now = new Date();
     let nextDrawTime: Date;
@@ -805,17 +894,18 @@ export class CashbackService {
 
   async getDashboardStats(userId: string) {
     const activeCycle = await this.cycleModel.findOne({ customerId: new Types.ObjectId(userId), status: 'active' });
+    const playableCycle = await this.findPlayableCycle(userId);
     const allCycles = await this.cycleModel.find({ customerId: new Types.ObjectId(userId) });
     const purchases = await this.purchaseModel.countDocuments({ customerId: new Types.ObjectId(userId) });
     const wins = await this.drawModel.find({ winnerUserId: userId });
     const totalWinnings = wins.reduce((sum, d) => sum + d.prizeAmount, 0);
     const walletBalance = await this.walletService.getBalance(userId);
-    const totalParticipants = await this.cycleModel.countDocuments({
-      $or: [
-        { status: 'active', currentLevel: { $gte: 1 } },
-        { status: 'completed', isPermanent: true },
-      ],
-    });
+    const latestParticipation = await this.participationModel.findOne({ customerId: new Types.ObjectId(userId) }).sort({ createdAt: -1 });
+    const now = new Date();
+    const participatedToday = !!latestParticipation && this.isSameUtcDay(latestParticipation.createdAt, now);
+    const hasEligibleCoupon = !!playableCycle;
+    const canPlayToday = hasEligibleCoupon && !participatedToday;
+    const totalParticipants = await this.participationModel.countDocuments({ status: 'pending' });
 
     return {
       walletBalance,
@@ -827,6 +917,16 @@ export class CashbackService {
       totalPurchases: purchases,
       totalWins: wins.length,
       totalParticipants,
+      playStatus: {
+        hasEligibleCoupon,
+        canPlayToday,
+        hasPlayedToday: participatedToday,
+        participationStatus: latestParticipation?.status || 'none',
+        couponNumber: playableCycle?.couponNumber || null,
+        enteredAt: latestParticipation?.enteredAt || null,
+        enteredIntoNextDraw: latestParticipation?.status === 'pending' && participatedToday,
+        nextEligiblePlayAt: canPlayToday ? null : this.getNextUtcMidnight(now),
+      },
       activeCycle: activeCycle
         ? {
             couponNumber: activeCycle.couponNumber,

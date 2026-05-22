@@ -161,6 +161,12 @@ export class CashbackController {
   }
 
   @UseGuards(JwtAuthGuard)
+  @Post('play-today')
+  async playForToday(@Request() req) {
+    return this.cashbackService.playForToday(req.user.userId);
+  }
+
+  @UseGuards(JwtAuthGuard)
   @Get('active-cycle')
   async getActiveCycle(@Request() req) {
     return this.cashbackService.getMyActiveCycle(req.user.userId);
