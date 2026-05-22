@@ -23,6 +23,10 @@ export class CashbackParticipation extends Document {
 
   @Prop()
   drawNumber?: number;
+
+  createdAt!: Date;
+
+  updatedAt!: Date;
 }
 
 export const CashbackParticipationSchema = SchemaFactory.createForClass(CashbackParticipation);
