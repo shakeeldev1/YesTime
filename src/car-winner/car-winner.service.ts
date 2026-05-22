@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { CarParticipation, ParticipationPhase, ParticipationStatus } from 'src/car-participation/schemas/car-participation.schema';
+import { CarPlayEntry } from 'src/car-participation/schemas/car-play-entry.schema';
 import { CarWinner } from './schemas/car-winner.schema';
 import { SpinnerDraw } from './schemas/spinner-draw.schema';
 import { User } from 'src/users/schemas/user.schema';
@@ -11,6 +12,7 @@ import { MailerService } from 'src/mailer/mailer.service';
 export class CarWinnerService {
     constructor(
         @InjectModel(CarParticipation.name) private carParticipationModel: Model<CarParticipation>,
+        @InjectModel(CarPlayEntry.name) private carPlayEntryModel: Model<CarPlayEntry>,
         @InjectModel(CarWinner.name) private carWinnerModel: Model<CarWinner>,
         @InjectModel(SpinnerDraw.name) private spinnerDrawModel: Model<SpinnerDraw>,
         @InjectModel(User.name) private userModel: Model<User>,
@@ -22,11 +24,15 @@ export class CarWinnerService {
     }
 
     async spinAndSelectWinner() {
+        const pendingPlayEntries = await this.carPlayEntryModel.find({ status: 'pending' });
+        const pendingCoupons = pendingPlayEntries.map((entry) => entry.coupenNumber);
+
         const eligibleParticipations = await this.carParticipationModel.find({
             status: ParticipationStatus.ACTIVE,
             phase: ParticipationPhase.PRE_WIN,
             hasWon: false,
-            carAwarded: false
+            carAwarded: false,
+            coupenNumber: { $in: pendingCoupons },
         }).populate('userId');
 
         const drawDate = new Date();
@@ -54,6 +60,11 @@ export class CarWinnerService {
         const spinnerDraw = new this.spinnerDrawModel(spinnerDoc);
         await spinnerDraw.save();
         console.debug('[CarWinner] spinnerSaved (only latest kept)', { winningCoupen: spinnerDraw.winningCoupen, drawDate: spinnerDraw.drawDate });
+
+        await this.carPlayEntryModel.updateMany(
+            { _id: { $in: pendingPlayEntries.map((entry) => entry._id) }, status: 'pending' },
+            { $set: { status: 'consumed', consumedAt: new Date(), consumedInDrawDate: drawDate } },
+        );
 
         if (!winner) {
             return {

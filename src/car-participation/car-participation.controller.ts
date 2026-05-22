@@ -18,6 +18,18 @@ export class CarParticipationController {
         return this.carParticipationService.getParticipation(req.user.userId);
     }
 
+    @Post('play-now')
+    @UseGuards(JwtAuthGuard)
+    playNow(@Request() req) {
+        return this.carParticipationService.playNow(req.user.userId);
+    }
+
+    @Get('play-status')
+    @UseGuards(JwtAuthGuard)
+    getPlayStatus(@Request() req) {
+        return this.carParticipationService.getMyPlayStatus(req.user.userId);
+    }
+
     // Public endpoint - no auth needed
     @Get("all-participations")
     getAllParticipations() {
