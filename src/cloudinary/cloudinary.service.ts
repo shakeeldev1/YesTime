@@ -19,4 +19,10 @@ export class CloudinaryService {
             uploadStream.end(file.buffer);
         });
     }
+
+    async deleteAsset(publicId: string, resourceType: 'image' | 'video' | 'raw' = 'image') {
+        return cloudinary.uploader.destroy(publicId, {
+            resource_type: resourceType,
+        });
+    }
 }

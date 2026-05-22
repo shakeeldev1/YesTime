@@ -14,6 +14,7 @@ import { GameModule } from './game/game.module';
 import { CashbackModule } from './cashback/cashback.module';
 import { MailerModule } from './mailer/mailer.module';
 import { RegistrationLotteryModule } from './registration-lottery/registration-lottery.module';
+import { EventsModule } from './events/events.module';
 import * as dotenv from 'dotenv';
 import { join } from 'path';
 
@@ -39,7 +40,8 @@ if (!mongoUri) {
     GameModule,
     CashbackModule,
     MailerModule,
-    RegistrationLotteryModule
+    RegistrationLotteryModule,
+    EventsModule,
   ],
   controllers: [AppController],
   providers: [AppService],
