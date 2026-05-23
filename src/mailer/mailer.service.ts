@@ -54,6 +54,36 @@ export class MailerService {
     }
   }
 
+  async sendPasswordResetEmail(to: string, otp: string, name: string): Promise<void> {
+    try {
+      await this.transporter.sendMail({
+        from: `"Yes Time" <${this.fromAddress}>`,
+        to,
+        subject: 'Password Reset Code - Yes Time',
+        html: `
+          <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+            <div style="background: linear-gradient(135deg, #003366, #1A539B); padding: 30px; border-radius: 10px 10px 0 0; text-align: center;">
+              <h1 style="color: white; margin: 0; font-size: 24px;">Yes Time</h1>
+              <p style="color: #82B1FF; margin: 5px 0 0;">Password Reset</p>
+            </div>
+            <div style="background: #ffffff; padding: 30px; border: 1px solid #e0e0e0; border-radius: 0 0 10px 10px;">
+              <p style="color: #333;">Hello <strong>${name}</strong>,</p>
+              <p style="color: #555;">Use this code to reset your password:</p>
+              <div style="background: #f5f5f5; padding: 20px; text-align: center; border-radius: 8px; margin: 20px 0;">
+                <span style="font-size: 32px; font-weight: bold; letter-spacing: 8px; color: #003366;">${otp}</span>
+              </div>
+              <p style="color: #555; font-size: 14px;">This code is valid for 10 minutes. If you did not request a reset, you can ignore this email.</p>
+            </div>
+          </div>
+        `,
+      });
+      this.logger.log(`Password reset email sent to ${to}`);
+    } catch (error) {
+      this.logger.error(`Failed to send password reset email to ${to}: ${error.message}`);
+      throw error;
+    }
+  }
+
   async sendShopkeeperApprovalEmail(to: string, name: string, shopName: string): Promise<void> {
     try {
       await this.transporter.sendMail({

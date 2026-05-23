@@ -8,6 +8,8 @@ import { DepositRequest } from './schemas/deposit-request.schema';
 import { CreateDepositRequestDto } from './dto/deposit-request.dto';
 import { CloudinaryService } from '../cloudinary/cloudinary.service';
 import { UsersService } from '../users/users.service';
+import { WithdrawalRequest } from './schemas/withdrawal-request.schema';
+import { CreateWithdrawalRequestDto } from './dto/withdrawal-request.dto';
 
 @Injectable()
 export class WalletService {
@@ -15,6 +17,7 @@ export class WalletService {
         @InjectModel(Wallet.name) private readonly walletModel: Model<Wallet>,
         @InjectModel(Transaction.name) private readonly transactionModel: Model<Transaction>,
         @InjectModel(DepositRequest.name) private readonly depositRequestModel: Model<DepositRequest>,
+        @InjectModel(WithdrawalRequest.name) private readonly withdrawalRequestModel: Model<WithdrawalRequest>,
         private readonly cloudinaryService: CloudinaryService,
         private readonly usersService: UsersService,
     ) { }
@@ -123,6 +126,100 @@ export class WalletService {
         if (request.status !== 'pending') {
             throw new BadRequestException('Only pending requests can be rejected');
         }
+
+        request.status = 'rejected';
+        request.reviewedBy = adminId;
+        request.reviewedAt = new Date();
+        request.reviewNote = reason || 'Rejected by admin';
+        await request.save();
+
+        return request;
+    }
+
+    async createWithdrawalRequest(userId: string, dto: CreateWithdrawalRequestDto) {
+        const amount = Number(dto.amount);
+        if (!amount || amount <= 0) {
+            throw new BadRequestException('Amount must be greater than 0');
+        }
+
+        const wallet = await this.walletModel.findOne({ userId });
+        if (!wallet || wallet.balance < amount) {
+            throw new BadRequestException('Insufficient balance');
+        }
+
+        await this.debit(userId, amount, `Pending withdrawal request via ${dto.withdrawalMethod}`);
+
+        const request = new this.withdrawalRequestModel({
+            userId,
+            amount,
+            withdrawalMethod: dto.withdrawalMethod,
+            accountTitle: dto.accountTitle,
+            accountNumber: dto.accountNumber,
+            bankName: dto.bankName,
+            note: dto.note,
+            status: 'pending',
+        });
+
+        try {
+            await request.save();
+        } catch (error) {
+            await this.credit(userId, amount, 'Reverted failed withdrawal request');
+            throw error;
+        }
+
+        return request;
+    }
+
+    async getMyWithdrawalRequests(userId: string) {
+        return this.withdrawalRequestModel.find({ userId }).sort({ createdAt: -1 }).exec();
+    }
+
+    async getPendingWithdrawalRequests() {
+        const requests = await this.withdrawalRequestModel.find({ status: 'pending' }).sort({ createdAt: 1 }).exec();
+
+        return Promise.all(requests.map(async (request) => {
+            const user = await this.usersService.findById(request.userId);
+            return {
+                ...request.toObject(),
+                user: user ? {
+                    id: user._id,
+                    name: user.name,
+                    email: user.email,
+                    phone: user.phone,
+                } : null,
+            };
+        }));
+    }
+
+    async markWithdrawalPaid(requestId: string, adminId: string, note?: string) {
+        const request = await this.withdrawalRequestModel.findById(requestId);
+        if (!request) {
+            throw new BadRequestException('Withdrawal request not found');
+        }
+        if (request.status !== 'pending') {
+            throw new BadRequestException('Only pending requests can be updated');
+        }
+
+        request.status = 'paid';
+        request.reviewedBy = adminId;
+        request.reviewedAt = new Date();
+        request.reviewNote = note || 'Paid manually by admin';
+        request.paidAt = new Date();
+        await request.save();
+
+        return request;
+    }
+
+    async rejectWithdrawalRequest(requestId: string, adminId: string, reason?: string) {
+        const request = await this.withdrawalRequestModel.findById(requestId);
+        if (!request) {
+            throw new BadRequestException('Withdrawal request not found');
+        }
+        if (request.status !== 'pending') {
+            throw new BadRequestException('Only pending requests can be rejected');
+        }
+
+        await this.credit(request.userId, request.amount, 'Refund for rejected withdrawal request');
 
         request.status = 'rejected';
         request.reviewedBy = adminId;

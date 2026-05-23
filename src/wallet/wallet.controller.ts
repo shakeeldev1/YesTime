@@ -6,6 +6,7 @@ import { RolesGuard } from 'src/auth/guards/roles.guard';
 import { Roles } from 'src/auth/decorators/roles.decorator';
 import { GetTransactionsDto } from './dto/transaction.dto';
 import { CreateDepositRequestDto } from './dto/deposit-request.dto';
+import { CreateWithdrawalRequestDto } from './dto/withdrawal-request.dto';
 
 @UseGuards(JwtAuthGuard)
 @Controller('wallet')
@@ -46,6 +47,24 @@ export class WalletController {
         return this.walletService.getMyDepositRequests(req.user.userId);
     }
 
+    @Post('withdrawal-requests')
+    async createWithdrawalRequest(@Request() req, @Body() body: CreateWithdrawalRequestDto) {
+        const amount = Number(body.amount);
+        if (!amount || amount <= 0) {
+            throw new BadRequestException('Amount must be greater than 0');
+        }
+        const request = await this.walletService.createWithdrawalRequest(req.user.userId, { ...body, amount: String(amount) });
+        return {
+            message: 'Withdrawal request submitted. Admin will process the payout manually.',
+            request,
+        };
+    }
+
+    @Get('withdrawal-requests/my')
+    async getMyWithdrawalRequests(@Request() req) {
+        return this.walletService.getMyWithdrawalRequests(req.user.userId);
+    }
+
     // Get transactions for logged-in user
     @Get('my-transactions')
     async getMyTransactions(@Request() req, @Query() query: GetTransactionsDto) {
@@ -75,6 +94,27 @@ export class WalletController {
         @Body() body: { reason?: string },
     ) {
         return this.walletService.rejectDepositRequest(requestId, req.user.userId, body.reason);
+    }
+
+    @UseGuards(RolesGuard)
+    @Roles('admin')
+    @Get('withdrawal-requests/pending')
+    async getPendingWithdrawalRequests() {
+        return this.walletService.getPendingWithdrawalRequests();
+    }
+
+    @UseGuards(RolesGuard)
+    @Roles('admin')
+    @Post('withdrawal-requests/:requestId/mark-paid')
+    async markWithdrawalPaid(@Request() req, @Param('requestId') requestId: string, @Body() body: { note?: string }) {
+        return this.walletService.markWithdrawalPaid(requestId, req.user.userId, body.note);
+    }
+
+    @UseGuards(RolesGuard)
+    @Roles('admin')
+    @Post('withdrawal-requests/:requestId/reject')
+    async rejectWithdrawalRequest(@Request() req, @Param('requestId') requestId: string, @Body() body: { reason?: string }) {
+        return this.walletService.rejectWithdrawalRequest(requestId, req.user.userId, body.reason);
     }
 
     // Admin-only routes

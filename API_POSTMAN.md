@@ -212,6 +212,120 @@
     { "name": "Cashback - Mark All Read", "method": "POST", "url": "/cashback/notifications/mark-all-read", "authRequired": true, "role": "user" },
     { "name": "Cashback - Delete Notification", "method": "DELETE", "url": "/cashback/notifications/:id", "authRequired": true, "role": "user", "params": { "id": "string" } },
 
+    {
+      "name": "Events - Public Listing",
+      "method": "GET",
+      "url": "/events",
+      "authRequired": false,
+      "description": "Public events feed. Returns only published events whose publishAt is not in the future and whose expiresAt has not passed.",
+      "query": {
+        "page?": "number",
+        "limit?": "number",
+        "filter?": "upcoming|past|all"
+      },
+      "responseNotes": "Default sort is by eventDate. Upcoming events are sorted ascending; past events descending."
+    },
+    {
+      "name": "Events - Public Detail",
+      "method": "GET",
+      "url": "/events/:identifier",
+      "authRequired": false,
+      "params": {
+        "identifier": "string (MongoId or slug)"
+      },
+      "description": "Fetch a single public event by MongoId or slug. Returns 404 for drafts, future-scheduled events, or expired events."
+    },
+    {
+      "name": "Events - Admin Listing",
+      "method": "GET",
+      "url": "/events/admin",
+      "authRequired": true,
+      "role": "admin",
+      "query": {
+        "page?": "number",
+        "limit?": "number",
+        "search?": "string",
+        "status?": "draft|published"
+      },
+      "description": "Admin event management list with search and status filtering. Returns all events, including drafts and scheduled items."
+    },
+    {
+      "name": "Events - Admin Detail",
+      "method": "GET",
+      "url": "/events/admin/:identifier",
+      "authRequired": true,
+      "role": "admin",
+      "params": {
+        "identifier": "string (MongoId or slug)"
+      },
+      "description": "Fetch a single event for admin editing, including drafts and future/expired events."
+    },
+    {
+      "name": "Events - Create (Admin Only)",
+      "method": "POST",
+      "url": "/events",
+      "authRequired": true,
+      "role": "admin",
+      "contentType": "multipart/form-data",
+      "multipartFields": ["coverImage (file)", "mediaFiles (multiple files)"],
+      "body": {
+        "title": "string",
+        "description": "string",
+        "eventDate": "ISO date string",
+        "location?": "string",
+        "status?": "draft|published",
+        "publishAt?": "ISO date string",
+        "expiresAt?": "ISO date string"
+      },
+      "requiredFields": ["title", "description", "eventDate", "coverImage"],
+      "description": "Creates a new event with Cloudinary-backed cover image and optional media gallery uploads.",
+      "responseNotes": "Media assets are stored as URLs plus Cloudinary publicId/resourceType metadata."
+    },
+    {
+      "name": "Events - Update (Admin Only)",
+      "method": "PUT",
+      "url": "/events/:id",
+      "authRequired": true,
+      "role": "admin",
+      "params": {
+        "id": "string (MongoId)"
+      },
+      "contentType": "multipart/form-data",
+      "multipartFields": ["coverImage (file, optional)", "mediaFiles (multiple files, optional)"],
+      "body": {
+        "title?": "string",
+        "description?": "string",
+        "eventDate?": "ISO date string",
+        "location?": "string",
+        "status?": "draft|published",
+        "publishAt?": "ISO date string",
+        "expiresAt?": "ISO date string"
+      },
+      "description": "Updates event content, scheduling, and media. New uploads are appended to the gallery and cover image can be replaced."
+    },
+    {
+      "name": "Events - Toggle Publish (Admin Only)",
+      "method": "PATCH",
+      "url": "/events/:id/toggle-publish",
+      "authRequired": true,
+      "role": "admin",
+      "params": {
+        "id": "string (MongoId)"
+      },
+      "description": "Switches an event between draft and published states. When publishing, publishAt is auto-filled if empty."
+    },
+    {
+      "name": "Events - Delete (Admin Only)",
+      "method": "DELETE",
+      "url": "/events/:id",
+      "authRequired": true,
+      "role": "admin",
+      "params": {
+        "id": "string (MongoId)"
+      },
+      "description": "Deletes an event and attempts to clean up its Cloudinary cover/gallery assets."
+    },
+
     { "name": "Profile - Get Me", "method": "GET", "url": "/profile/me", "authRequired": true },
     {
       "name": "Profile - Update",

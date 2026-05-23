@@ -31,6 +31,12 @@ export class User extends Document {
   @Prop()
   otp?: string;
 
+  @Prop()
+  resetOtp?: string;
+
+  @Prop()
+  resetOtpExpiresAt?: Date;
+
   @Prop({ required: true })
   password!: string;
 

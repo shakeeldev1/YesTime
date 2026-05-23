@@ -13,6 +13,9 @@ export class Transaction {
 
     @Prop()
     description?: string;
+
+    @Prop({ default: 'completed' })
+    status?: string;
     
 }
 

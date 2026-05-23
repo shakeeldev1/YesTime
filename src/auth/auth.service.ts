@@ -120,6 +120,44 @@ export class AuthService {
         };
     }
 
+    async requestPasswordReset(email: string) {
+        const user = await this.userService.findByEmail(email);
+        if (!user) {
+            return { message: 'If an account exists for this email, a reset code has been sent.' };
+        }
+
+        const resetOtp = await this.generateOtp();
+        const resetOtpExpiresAt = new Date(Date.now() + 10 * 60 * 1000);
+        await this.userService.updateResetPasswordCode(user._id.toString(), { resetOtp, resetOtpExpiresAt });
+
+        try {
+            await this.mailerService.sendPasswordResetEmail(user.email, resetOtp, user.name);
+        } catch (error) {
+            console.error('Failed to send password reset email:', error instanceof Error ? error.message : String(error));
+        }
+
+        return { message: 'If an account exists for this email, a reset code has been sent.' };
+    }
+
+    async resetPassword(email: string, code: string, newPassword: string) {
+        const user = await this.userService.findByEmail(email);
+        if (!user) {
+            throw new BadRequestException('Invalid or expired reset code');
+        }
+
+        const resetOtp = (user as any).resetOtp;
+        const resetOtpExpiresAt = (user as any).resetOtpExpiresAt ? new Date((user as any).resetOtpExpiresAt) : null;
+        if (!resetOtp || resetOtp !== code || !resetOtpExpiresAt || resetOtpExpiresAt.getTime() < Date.now()) {
+            throw new BadRequestException('Invalid or expired reset code');
+        }
+
+        const hashedPassword = await bcrypt.hash(newPassword, 10);
+        await this.userService.updatePassword(user._id.toString(), hashedPassword);
+        await this.userService.updateResetPasswordCode(user._id.toString(), { resetOtp: null, resetOtpExpiresAt: null });
+
+        return { message: 'Password reset successfully' };
+    }
+
     async logout(userId: string) {
         const user = await this.userService.findById(userId);
         if (!user) throw new BadRequestException('User not found');

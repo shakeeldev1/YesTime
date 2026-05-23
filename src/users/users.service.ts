@@ -66,6 +66,17 @@ export class UsersService {
         return this.userModel.findByIdAndUpdate(userId, { password: hashedPassword }, { new: true }).select('-password').exec();
     }
 
+    async updateResetPasswordCode(userId: string, data: { resetOtp: string | null; resetOtpExpiresAt?: Date | null }): Promise<User | null> {
+        return this.userModel.findByIdAndUpdate(
+            userId,
+            {
+                resetOtp: data.resetOtp,
+                resetOtpExpiresAt: data.resetOtpExpiresAt ?? null,
+            },
+            { new: true },
+        ).select('-password').exec();
+    }
+
     async updateRefreshToken(userId: string, data: { refreshToken: string | null }): Promise<User | null> {
         return this.userModel.findByIdAndUpdate(userId, { refreshToken: data.refreshToken }, { new: true }).exec();
     }
