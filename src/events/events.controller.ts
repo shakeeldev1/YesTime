@@ -19,6 +19,12 @@ import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { EventsService } from './events.service';
 
+const eventUploadLimits = {
+  limits: {
+    fileSize: 200 * 1024 * 1024,
+  },
+};
+
 @Controller('events')
 export class EventsController {
   constructor(private readonly eventsService: EventsService) {}
@@ -72,7 +78,7 @@ export class EventsController {
     FileFieldsInterceptor([
       { name: 'coverImage', maxCount: 1 },
       { name: 'mediaFiles', maxCount: 20 },
-    ]),
+    ], eventUploadLimits),
   )
   async createEvent(
     @Request() req,
@@ -98,7 +104,7 @@ export class EventsController {
     FileFieldsInterceptor([
       { name: 'coverImage', maxCount: 1 },
       { name: 'mediaFiles', maxCount: 20 },
-    ]),
+    ], eventUploadLimits),
   )
   async updateEvent(
     @Param('id') id: string,
