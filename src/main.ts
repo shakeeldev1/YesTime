@@ -14,6 +14,7 @@ async function bootstrap() {
       'https://api.yestimeltd.com',
       'http://localhost:5173',
       'http://localhost:3000',
+      'https://yes-time.vercel.app'
     ].filter(Boolean),
   );
 
