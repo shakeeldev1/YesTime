@@ -2,7 +2,11 @@ import { BadRequestException, Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { CarParticipation, ParticipationPhase, ParticipationStatus } from './schemas/car-participation.schema';
 import { CarPlayEntry } from './schemas/car-play-entry.schema';
+import { CarContribution } from '../car-contributions/schemas/car-contribution.schema';
 import { Model, Types } from 'mongoose';
+
+// PKR 50 of same-day PRE_WIN contribution buys one independent play/draw chance.
+const PKR_PER_PLAY = 50;
 
 @Injectable()
 export class CarParticipationService {
@@ -11,6 +15,9 @@ export class CarParticipationService {
 
     @InjectModel(CarPlayEntry.name)
     private readonly carPlayEntryModel: Model<CarPlayEntry>;
+
+    @InjectModel(CarContribution.name)
+    private readonly carContributionModel: Model<CarContribution>;
 
     private getUtcDateKey(date: Date): string {
         return date.toISOString().slice(0, 10);
@@ -60,6 +67,25 @@ export class CarParticipationService {
         return await this.carParticipationModel.findOne({ userId });
     }
 
+    private getUtcDayRange(reference: Date): { start: Date; end: Date } {
+        const start = new Date(reference);
+        start.setUTCHours(0, 0, 0, 0);
+        const end = new Date(start);
+        end.setUTCHours(24, 0, 0, 0);
+        return { start, end };
+    }
+
+    // Sums today's PRE_WIN contributions for this user to determine how many
+    // independent play chances (PKR 50 = 1 play) they've earned today.
+    private async getTodaysContributionAmount(userId: string, now: Date): Promise<number> {
+        const { start, end } = this.getUtcDayRange(now);
+        const result = await this.carContributionModel.aggregate([
+            { $match: { userId: new Types.ObjectId(userId), createdAt: { $gte: start, $lt: end } } },
+            { $group: { _id: null, total: { $sum: '$amount' } } },
+        ]);
+        return result[0]?.total || 0;
+    }
+
     async playNow(userId: string) {
         const participation = await this.getEligibleParticipationForPlay(userId);
         if (!participation) {
@@ -81,21 +107,29 @@ export class CarParticipationService {
             throw new BadRequestException(message);
         }
 
+        const todaysContribution = await this.getTodaysContributionAmount(userId, now);
+        const plays = Math.floor(todaysContribution / PKR_PER_PLAY);
+        if (plays < 1) {
+            throw new BadRequestException(`You need to contribute at least PKR ${PKR_PER_PLAY} today before you can play. Make a payment first.`);
+        }
+
+        const entries = Array.from({ length: plays }, () => ({
+            userId: new Types.ObjectId(userId),
+            coupenNumber: participation.coupenNumber,
+            playDateKey,
+            status: 'pending',
+            enteredAt: now,
+        }));
+
         try {
-            const entry = new this.carPlayEntryModel({
-                userId: new Types.ObjectId(userId),
-                coupenNumber: participation.coupenNumber,
-                playDateKey,
-                status: 'pending',
-                enteredAt: now,
-            });
-            await entry.save();
+            await this.carPlayEntryModel.insertMany(entries);
 
             return {
-                message: "Joined Today's Lottery",
+                message: `Joined Today's Lottery with ${plays} play${plays > 1 ? 's' : ''}`,
                 canPlayToday: false,
                 hasPlayedToday: true,
                 enteredIntoNextDraw: true,
+                playsCount: plays,
                 playDateKey,
                 coupenNumber: participation.coupenNumber,
                 nextEligiblePlayAt: this.getNextUtcMidnight(now),
@@ -114,21 +148,31 @@ export class CarParticipationService {
         const now = new Date();
         const playDateKey = this.getUtcDateKey(now);
 
-        const todayEntry = await this.carPlayEntryModel.findOne({
+        const todayEntries = await this.carPlayEntryModel.find({
             userId: new Types.ObjectId(userId),
             playDateKey,
         });
 
-        const hasPlayedToday = !!todayEntry;
-        const enteredIntoNextDraw = todayEntry?.status === 'pending';
+        const hasPlayedToday = todayEntries.length > 0;
+        const enteredIntoNextDraw = todayEntries.some((entry) => entry.status === 'pending');
+        const todaysContribution = await this.getTodaysContributionAmount(userId, now);
+        const playsAvailableToday = Math.floor(todaysContribution / PKR_PER_PLAY);
 
         return {
             hasJoinedScheme,
             hasEligibleCoupon: !!participation,
-            canPlayToday: !!participation && !hasPlayedToday,
+            canPlayToday: !!participation && !hasPlayedToday && playsAvailableToday >= 1,
             hasPlayedToday,
             enteredIntoNextDraw,
-            statusText: enteredIntoNextDraw ? "Joined Today's Lottery" : hasPlayedToday ? 'Already Played Today' : 'Ready to Play',
+            playsToday: todayEntries.length,
+            playsAvailableToday,
+            statusText: enteredIntoNextDraw
+                ? "Joined Today's Lottery"
+                : hasPlayedToday
+                    ? 'Already Played Today'
+                    : playsAvailableToday >= 1
+                        ? 'Ready to Play'
+                        : `Contribute at least PKR ${PKR_PER_PLAY} today to play`,
             coupenNumber: participation?.coupenNumber || null,
             nextEligiblePlayAt: hasPlayedToday ? this.getNextUtcMidnight(now) : null,
         };

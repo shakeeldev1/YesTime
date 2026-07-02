@@ -5,7 +5,6 @@ import { CarWinnerService } from './car-winner.service';
 import { CarWinner, CarWinnerSchema } from './schemas/car-winner.schema';
 import { SpinnerDraw, SpinnerDrawSchema } from './schemas/spinner-draw.schema';
 import { CarParticipationModule } from 'src/car-participation/car-participation.module';
-import { CarDrawScheduler } from './car-draw.scheduler';
 import { User, UserSchema } from 'src/users/schemas/user.schema';
 
 @Module({
@@ -18,6 +17,7 @@ import { User, UserSchema } from 'src/users/schemas/user.schema';
     CarParticipationModule
   ],
   controllers: [CarWinnerController],
-  providers: [CarWinnerService, CarDrawScheduler]
+  providers: [CarWinnerService],
+  exports: [CarWinnerService],
 })
 export class CarWinnerModule {}

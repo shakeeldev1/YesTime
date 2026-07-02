@@ -1,343 +1,174 @@
 ```json
 {
   "info": {
-    "name": "yes-time API (frontend) - Postman-like",
-    "version": "1.0.1",
-    "baseUrl": "http://localhost:3000"
+    "name": "yes-time API (frontend/flutter) - Postman-like",
+    "version": "2.0.0",
+    "baseUrl": "http://localhost:3000",
+    "notes": "No global route prefix. All monetary amounts are PKR integers. A single shared scheduler ticks every minute and rotates the 4 lottery draws in order Registration Lottery -> Car Contribution -> Game -> Cashback, so each module's own draw fires once every 4 minutes."
   },
   "auth": {
     "type": "bearer",
-    "header": "Authorization: Bearer <token>",
-    "notes": "Include the Authorization header for endpoints with `authRequired: true`."
+    "header": "Authorization: Bearer <access_token>",
+    "notes": "Include the Authorization header for endpoints with `authRequired: true`. Access tokens expire in 15 minutes; use Refresh Token to get a new pair. Endpoints with `role: \"admin\"` require the JWT's role claim to be admin (enforced server-side via RolesGuard) - a non-admin JWT gets 403."
   },
   "endpoints": [
     { "name": "Health", "method": "GET", "url": "/", "authRequired": false, "description": "Health / hello" },
 
-    {
-      "name": "Signup",
-      "method": "POST",
-      "url": "/auth/signup",
-      "authRequired": false,
-      "description": "JSON signup with CNIC number and strong password rules",
-      "contentType": "application/json",
-      "bodyDto": "server/src/auth/dto/signup.dto.ts",
-      "requiredFields": [
+    { "name": "Signup", "method": "POST", "url": "/auth/signup", "authRequired": false, "description": "JSON signup with CNIC number and strong password rules. Sends an OTP email.", "contentType": "application/json", "bodyDto": "server/src/auth/dto/signup.dto.ts", "requiredFields": [
         { "name": "name", "type": "string" },
         { "name": "email", "type": "string (email)" },
         { "name": "phone", "type": "string" },
-        { "name": "password", "type": "string" },
-        { "name": "cnicNumber", "type": "string (13 digits)" }
-      ]
-    },
-
-    { "name": "Verify OTP", "method": "POST", "url": "/auth/verify-otp", "authRequired": false, "body": { "email": "string", "otp": "string" }, "requiredFields": ["email","otp"] },
+        { "name": "password", "type": "string (min 8, 1 lowercase, 1 uppercase, 1 special char)" },
+        { "name": "cnicNumber", "type": "string (exactly 13 digits)" }
+      ] },
+    { "name": "Verify OTP", "method": "POST", "url": "/auth/verify-otp", "authRequired": false, "body": { "email": "string", "otp": "string" }, "requiredFields": ["email","otp"], "responseNotes": "Returns access_token, refreshToken, and user object on success." },
     { "name": "Resend OTP", "method": "POST", "url": "/auth/resend-otp", "authRequired": false, "body": { "email": "string" }, "requiredFields": ["email"] },
-    { "name": "Login", "method": "POST", "url": "/auth/login", "authRequired": false, "bodyDto": "server/src/auth/dto/login.dto.ts", "requiredFields": ["email","password"] },
-    { "name": "Refresh Token", "method": "POST", "url": "/auth/refresh", "authRequired": false, "bodyDto": "server/src/auth/dto/refresh.dto.ts", "requiredFields": ["refreshToken"] },
-    { "name": "Logout", "method": "POST", "url": "/auth/logout", "authRequired": true },
+    { "name": "Login", "method": "POST", "url": "/auth/login", "authRequired": false, "bodyDto": "server/src/auth/dto/login.dto.ts", "requiredFields": ["email","password"], "responseNotes": "Returns access_token, refreshToken, and user object." },
+    { "name": "Forgot Password", "method": "POST", "url": "/auth/forgot-password", "authRequired": false, "body": { "email": "string" }, "requiredFields": ["email"], "responseNotes": "Always returns a generic success message (does not leak whether the email exists). Sends a reset OTP valid for 10 minutes." },
+    { "name": "Reset Password", "method": "POST", "url": "/auth/reset-password", "authRequired": false, "body": { "email": "string", "code": "string", "newPassword": "string" }, "requiredFields": ["email","code","newPassword"] },
+    { "name": "Logout", "method": "POST", "url": "/auth/logout", "authRequired": true, "description": "Invalidates the stored refresh token." },
     { "name": "Change Password", "method": "POST", "url": "/auth/change-password", "authRequired": true, "body": { "currentPassword": "string", "newPassword": "string" }, "requiredFields": ["currentPassword","newPassword"] },
-    { "name": "Select Role", "method": "POST", "url": "/auth/select-role", "authRequired": true, "body": { "role": "string", "shopName?": "string", "shopLocation?": "string", "shopType?": "string", "shopDescription?": "string" }, "requiredFields": ["role"] },
+    { "name": "Select Role", "method": "POST", "url": "/auth/select-role", "authRequired": true, "body": { "role": "'user' | 'shopkeeper'", "shopName?": "string", "shopLocation?": "string", "shopType?": "string", "shopDescription?": "string" }, "requiredFields": ["role"], "description": "For role='shopkeeper', shopName/shopLocation/shopType are required and this also creates a pending cashback shopkeeper request. User.role stays 'user' until admin approval." },
+    { "name": "Refresh Token", "method": "POST", "url": "/auth/refresh", "authRequired": false, "bodyDto": "server/src/auth/dto/refresh.dto.ts", "requiredFields": ["refreshToken"] },
 
-    { "name": "Get My Balance", "method": "GET", "url": "/wallet/my-balance", "authRequired": true },
-    {
-      "name": "Add Balance (Manual Request)",
-      "method": "POST",
-      "url": "/wallet/add-balance",
-      "authRequired": true,
-      "contentType": "multipart/form-data",
-      "multipartFields": ["paymentScreenshot (file)"],
-      "body": {
-        "amount": "number (PKR, >0, <=100000)",
-        "paymentMethod": "string",
-        "senderName": "string",
-        "bankName?": "string",
-        "transactionReference?": "string",
-        "note?": "string"
-      },
-      "requiredFields": ["amount", "paymentMethod", "senderName", "paymentScreenshot"],
-      "responseNotes": "Creates a pending payment request. Admin approval is required before the wallet is credited."
-    },
-    { "name": "My Deposit Requests", "method": "GET", "url": "/wallet/deposit-requests/my", "authRequired": true },
-    { "name": "Pending Deposit Requests (Admin)", "method": "GET", "url": "/wallet/deposit-requests/pending", "authRequired": true, "role": "admin" },
-    { "name": "Approve Deposit Request (Admin)", "method": "POST", "url": "/wallet/deposit-requests/:requestId/approve", "authRequired": true, "role": "admin", "params": { "requestId": "string (MongoId)" } },
-    { "name": "Reject Deposit Request (Admin)", "method": "POST", "url": "/wallet/deposit-requests/:requestId/reject", "authRequired": true, "role": "admin", "params": { "requestId": "string (MongoId)" }, "body": { "reason?": "string" } },
-    { "name": "My Transactions", "method": "GET", "url": "/wallet/my-transactions", "authRequired": true, "query": "See server/src/wallet/dto/transaction.dto.ts for filters" },
-
-    { "name": "Join Car Participation", "method": "POST", "url": "/car-participation/join", "authRequired": true, "body": { "referredByUserId?": "string" } },
-    { "name": "My Participation", "method": "GET", "url": "/car-participation/my-participation", "authRequired": true },
-    { "name": "All Participations", "method": "GET", "url": "/car-participation/all-participations", "authRequired": false },
-
-    {
-      "name": "Create Car Contribution",
-      "method": "POST",
-      "url": "/car-contributions",
-      "authRequired": true,
-      "bodyDto": "server/src/car-contributions/dto/car-contribution.dto.ts",
-      "requiredFields": [
-        { "name": "participationId", "type": "string (MongoId)" },
-        { "name": "amount", "type": "number (>=0)" }
-      ]
-    },
-    { "name": "My Contributions", "method": "GET", "url": "/car-contributions/my", "authRequired": true },
-    { "name": "Contribution Stats", "method": "GET", "url": "/car-contributions/stats", "authRequired": true },
-
-    { "name": "Car Winner - Next Draw", "method": "GET", "url": "/", "authRequired": false },
-    { "name": "Car Winner - All", "method": "GET", "url": "/car-winner/all", "authRequired": false },
-    { "name": "Car Winner - Draw History", "method": "GET", "url": "/car-winner/draw-history", "authRequired": false, "query": { "limit?": "number" } },
-    { "name": "Car Winner - Stats", "method": "GET", "url": "/car-winner/stats", "authRequired": false },
-
-    { "name": "Pay Registration Lottery", "method": "POST", "url": "/registration-lottery/pay", "authRequired": true },
-    { "name": "My Lottery Info", "method": "GET", "url": "/registration-lottery/my-info", "authRequired": true },
-    { "name": "Lottery Dashboard Stats", "method": "GET", "url": "/registration-lottery/dashboard-stats", "authRequired": true },
-    { "name": "Lottery Draw History", "method": "GET", "url": "/registration-lottery/draw-history", "authRequired": false, "query": { "limit?": "number" } },
-    { "name": "Lottery Next Draw", "method": "GET", "url": "/registration-lottery/next-draw", "authRequired": false },
-    { "name": "Lottery Winning History", "method": "GET", "url": "/registration-lottery/winning-history", "authRequired": true },
-    { "name": "Lottery Trigger Draw", "method": "POST", "url": "/registration-lottery/trigger-draw", "authRequired": true },
-    { "name": "Lottery Notifications", "method": "GET", "url": "/registration-lottery/notifications", "authRequired": true, "query": { "limit?": "number" } },
-    { "name": "Lottery Unread Count", "method": "GET", "url": "/registration-lottery/notifications/unread-count", "authRequired": true },
-    { "name": "Lottery Mark Notification Read", "method": "POST", "url": "/registration-lottery/notifications/:id/read", "authRequired": true, "params": { "id": "string" } },
-    { "name": "Lottery Mark All Read", "method": "POST", "url": "/registration-lottery/notifications/mark-all-read", "authRequired": true },
-    { "name": "Lottery Delete Notification", "method": "DELETE", "url": "/registration-lottery/notifications/:id", "authRequired": true, "params": { "id": "string" } },
-
-    {
-      "name": "Game Join / Invest",
-      "method": "POST",
-      "url": "/game/join",
-      "authRequired": true,
-      "description": "Invest PKR 50 to create or upgrade the current date-based token"
-    },
-    { "name": "Game Play Now", "method": "POST", "url": "/game/play-now", "authRequired": true, "body": { "tokenId?": "string (MongoId)" } },
-    { "name": "Game Auto Join Next Round", "method": "POST", "url": "/game/auto-join-next-round", "authRequired": true, "body": { "tokenId?": "string (MongoId)" } },
-    { "name": "Game Daily Payment (Legacy Alias)", "method": "POST", "url": "/game/daily-payment", "authRequired": true, "body": { "tokenId?": "string (MongoId)" }, "description": "Compatibility alias for Play Now" },
-    { "name": "Game Active Cycle", "method": "GET", "url": "/game/active-cycle", "authRequired": true },
-    { "name": "Game Savings", "method": "GET", "url": "/game/savings", "authRequired": true },
-    { "name": "Game Coupons", "method": "GET", "url": "/game/coupons", "authRequired": true },
-    { "name": "Game Payment History", "method": "GET", "url": "/game/payment-history", "authRequired": true, "query": { "limit?": "number", "page?": "number" } },
-    { "name": "Game Dashboard Stats", "method": "GET", "url": "/game/dashboard-stats", "authRequired": true },
-    { "name": "Game Draw History", "method": "GET", "url": "/game/draw-history", "authRequired": false, "query": { "limit?": "number" } },
-    { "name": "Game Next Draw", "method": "GET", "url": "/game/next-draw", "authRequired": false },
-    { "name": "Game Winning History", "method": "GET", "url": "/game/winning-history", "authRequired": true },
-    { "name": "Game Trigger Draw", "method": "POST", "url": "/game/trigger-draw", "authRequired": true },
-    { "name": "Game Notifications", "method": "GET", "url": "/game/notifications", "authRequired": true, "query": { "limit?": "number" } },
-    { "name": "Game Unread Count", "method": "GET", "url": "/game/notifications/unread-count", "authRequired": true },
-    { "name": "Game Mark Notification Read", "method": "POST", "url": "/game/notifications/:id/read", "authRequired": true, "params": { "id": "string" } },
-    { "name": "Game Mark All Read", "method": "POST", "url": "/game/notifications/mark-all-read", "authRequired": true },
-    { "name": "Game Delete Notification", "method": "DELETE", "url": "/game/notifications/:id", "authRequired": true, "params": { "id": "string" } },
-
-    {
-      "name": "Cashback - Request Shopkeeper",
-      "method": "POST",
-      "url": "/cashback/shopkeeper/request",
-      "authRequired": true,
-      "role": "user",
-      "bodyDto": "server/src/cashback/dto/cashback.dto.ts",
-      "requiredFields": [
-        { "name": "shopName", "type": "string" },
-        { "name": "ownerName", "type": "string" },
-        { "name": "phone", "type": "string" }
-      ],
-      "optionalFields": [ { "name": "address", "type": "string" } ],
-      "description": "Submit a request to become a shopkeeper. Note: Payment gateway not yet implemented. Fee will be charged when payment method is added.",
-      "businessLogic": "STAGE 1 (User Request): (1) Collect shopkeeper details. (2) Shopkeeper record created: status='pending', isRegistrationPaid=false. (3) User.role stays 'user', shopkeeperStatus='pending'. (4) Request sent to admin dashboard. STAGE 2 (Admin Approval): (1) Admin reviews request. (2) Admin approves: Shopkeeper status→'active', User.role→'shopkeeper', shopkeeperStatus→'approved'. (3) User can now record purchases. If Rejected: User can reapply without any fee (temporary - will change when payment gateway is implemented).",
-      "responseNotes": "No fee charged at this time. shopkeeperStatus='pending'. isRegistrationPaid=false. User.role remains 'user'. Message: 'Shopkeeper request submitted. Waiting for admin review.' After admin approval: status='active', User.role='shopkeeper'.",
-      "errors": { "Already has request": "Status is 'pending' or 'active'. Contact admin." }
-    },
-    {
-      "name": "Cashback - Approve Shopkeeper (Admin Only)",
-      "method": "POST",
-      "url": "/cashback/shopkeeper/:id/approve",
-      "authRequired": true,
-      "role": "admin",
-      "requiredParams": [ { "name": "id", "type": "string (MongoId)" } ],
-      "description": "Admin approves a pending shopkeeper request. Note: No registration fee charged at this time (payment gateway pending).",
-      "businessLogic": "(1) Find shopkeeper with status='pending'. (2) Set shopkeeper.status='active'. (3) Update user.role→'shopkeeper', shopkeeperStatus→'approved'. (4) Send approval notification to user. (5) Fee: Not applicable at this time (will be implemented with payment gateway).",
-      "responseNotes": "Approval is processed immediately. Shopkeeper status='active'. User role becomes 'shopkeeper'. User can now record purchases.",
-      "errors": { "Not in pending status": "Only pending requests can be approved." }
-    },
-    {
-      "name": "Cashback - Reject Shopkeeper (Admin Only)",
-      "method": "POST",
-      "url": "/cashback/shopkeeper/:id/reject",
-      "authRequired": true,
-      "role": "admin",
-      "requiredParams": [ { "name": "id", "type": "string (MongoId)" } ],
-      "optionalFields": [ { "name": "reason", "type": "string" } ],
-      "description": "Admin rejects a pending shopkeeper request. Note: No registration fee to refund (payment gateway not yet implemented).",
-      "businessLogic": "(1) Find shopkeeper with status='pending'. (2) No refund needed (fee not charged at this time). (3) Set shopkeeper.status='rejected'. (4) Send rejection notification with reason. (5) User can reapply later without any fee (temporary - will change when payment gateway is implemented).",
-      "responseNotes": "No fee refund necessary at this time. User can reapply without losing money. Message: 'Request has been rejected.'",
-      "errors": { "Not in pending status": "Only pending requests can be rejected." }
-    },
-    { "name": "Cashback - My Shop", "method": "GET", "url": "/cashback/shopkeeper/my-shop", "authRequired": true, "role": "shopkeeper" },
-    { "name": "Cashback - Get Shopkeeper By ID", "method": "GET", "url": "/cashback/shopkeeper/:id", "authRequired": true, "role": "user", "params": { "id": "string" } },
-    {
-      "name": "Cashback - Record Purchase",
-      "method": "POST",
-      "url": "/cashback/purchase",
-      "authRequired": true,
-      "role": "shopkeeper",
-      "bodyDto": "server/src/cashback/dto/cashback.dto.ts",
-      "requiredFields": [
-        { "name": "customerCoupon", "type": "string" },
-        { "name": "amount", "type": "number (>=1)" }
-      ],
-      "optionalFields": [
-        { "name": "shopkeeperId", "type": "string (MongoId) — optional" },
-        { "name": "description", "type": "string" }
-      ],
-      "description": "Record a customer purchase. Requires user.role='shopkeeper' AND shopkeeper.status='active'.",
-      "businessLogic": "(1) Verify user.role='shopkeeper'. (2) Find shopkeeper: status='active' required. (3) Find customer cycle by coupon (active/completed/won). (4) Commission (2.5%) deducted from shopkeeper wallet. (5) Full amount added to customer cycle. (6) At level 30: cycle becomes permanent.",
-      "example": {
-        "body": {
-          "customerCoupon": "123456",
-          "amount": 500,
-          "description": "Grocery"
-        }
-      }
-    },
-    { "name": "Cashback - My Purchases", "method": "GET", "url": "/cashback/purchases/my", "authRequired": true, "role": "customer", "query": { "limit?": "number" } },
-    { "name": "Cashback - Shopkeeper Sales Overview", "method": "GET", "url": "/cashback/shopkeeper/sales-overview", "authRequired": true, "role": "shopkeeper", "query": { "range?": "daily|monthly|yearly", "start?": "YYYY-MM-DD", "end?": "YYYY-MM-DD" }, "description": "Aggregated sales for graphing: returns array of {period, totalSales, totalCommission, count}" },
-    { "name": "Cashback - Shop Purchases", "method": "GET", "url": "/cashback/purchases/shop/:shopkeeperId", "authRequired": true, "role": "shopkeeper|admin", "params": { "shopkeeperId": "string" } },
-    { "name": "Cashback - Shopkeeper Purchases", "method": "GET", "url": "/cashback/purchases/shopkeeper/:shopkeeperId", "authRequired": true, "role": "shopkeeper", "params": { "shopkeeperId": "string" } },
-    { "name": "Cashback - Join", "method": "POST", "url": "/cashback/join", "authRequired": true, "role": "customer" },
-    { "name": "Cashback - Active Cycle", "method": "GET", "url": "/cashback/active-cycle", "authRequired": true, "role": "customer" },
-    { "name": "Cashback - My Cycles", "method": "GET", "url": "/cashback/my-cycles", "authRequired": true, "role": "customer" },
-    { "name": "Cashback - Commitment Table", "method": "GET", "url": "/cashback/commitment-table", "authRequired": true, "role": "customer" },
-    { "name": "Cashback - Draw History", "method": "GET", "url": "/cashback/draw/history", "authRequired": false, "role": "public" },
-    { "name": "Cashback - Next Draw", "method": "GET", "url": "/cashback/draw/next", "authRequired": false, "role": "public", "description": "Get information about the next upcoming cashback draw", "responseNotes": "serverTime: Current server time. nextDrawTime: Scheduled time for the next draw. countdown: Seconds until next draw. drawNumber: Sequence number of the next draw. totalParticipants: Number of eligible participants (only counts active cycles at level >= 1 + permanent completed cycles). lastDraw: Details of the most recently completed draw, or null if no draws have been executed yet. Note: If totalParticipants is 0, the draw will execute but will have no winner." },
-    { "name": "Cashback - Winning History", "method": "GET", "url": "/cashback/draw/winning-history", "authRequired": true, "role": "customer" },
-    { "name": "Cashback - Dashboard Stats", "method": "GET", "url": "/cashback/dashboard-stats", "authRequired": true, "role": "user" },
-    { "name": "Cashback - Notifications", "method": "GET", "url": "/cashback/notifications", "authRequired": true, "role": "user", "query": { "limit?": "number" } },
-    { "name": "Cashback - Unread Count", "method": "GET", "url": "/cashback/notifications/unread-count", "authRequired": true, "role": "user" },
-    { "name": "Cashback - Mark Notification Read", "method": "POST", "url": "/cashback/notifications/:id/read", "authRequired": true, "role": "user", "params": { "id": "string" } },
-    { "name": "Cashback - Mark All Read", "method": "POST", "url": "/cashback/notifications/mark-all-read", "authRequired": true, "role": "user" },
-    { "name": "Cashback - Delete Notification", "method": "DELETE", "url": "/cashback/notifications/:id", "authRequired": true, "role": "user", "params": { "id": "string" } },
-
-    {
-      "name": "Events - Public Listing",
-      "method": "GET",
-      "url": "/events",
-      "authRequired": false,
-      "description": "Public events feed. Returns only published events whose publishAt is not in the future and whose expiresAt has not passed.",
-      "query": {
-        "page?": "number",
-        "limit?": "number",
-        "filter?": "upcoming|past|all"
-      },
-      "responseNotes": "Default sort is by eventDate. Upcoming events are sorted ascending; past events descending."
-    },
-    {
-      "name": "Events - Public Detail",
-      "method": "GET",
-      "url": "/events/:identifier",
-      "authRequired": false,
-      "params": {
-        "identifier": "string (MongoId or slug)"
-      },
-      "description": "Fetch a single public event by MongoId or slug. Returns 404 for drafts, future-scheduled events, or expired events."
-    },
-    {
-      "name": "Events - Admin Listing",
-      "method": "GET",
-      "url": "/events/admin",
-      "authRequired": true,
-      "role": "admin",
-      "query": {
-        "page?": "number",
-        "limit?": "number",
-        "search?": "string",
-        "status?": "draft|published"
-      },
-      "description": "Admin event management list with search and status filtering. Returns all events, including drafts and scheduled items."
-    },
-    {
-      "name": "Events - Admin Detail",
-      "method": "GET",
-      "url": "/events/admin/:identifier",
-      "authRequired": true,
-      "role": "admin",
-      "params": {
-        "identifier": "string (MongoId or slug)"
-      },
-      "description": "Fetch a single event for admin editing, including drafts and future/expired events."
-    },
-    {
-      "name": "Events - Create (Admin Only)",
-      "method": "POST",
-      "url": "/events",
-      "authRequired": true,
-      "role": "admin",
-      "contentType": "multipart/form-data",
-      "multipartFields": ["coverImage (file)", "mediaFiles (multiple files)"],
-      "body": {
-        "title": "string",
-        "description": "string",
-        "eventDate": "ISO date string",
-        "location?": "string",
-        "status?": "draft|published",
-        "publishAt?": "ISO date string",
-        "expiresAt?": "ISO date string"
-      },
-      "requiredFields": ["title", "description", "eventDate", "coverImage"],
-      "description": "Creates a new event with Cloudinary-backed cover image and optional media gallery uploads.",
-      "responseNotes": "Media assets are stored as URLs plus Cloudinary publicId/resourceType metadata."
-    },
-    {
-      "name": "Events - Update (Admin Only)",
-      "method": "PUT",
-      "url": "/events/:id",
-      "authRequired": true,
-      "role": "admin",
-      "params": {
-        "id": "string (MongoId)"
-      },
-      "contentType": "multipart/form-data",
-      "multipartFields": ["coverImage (file, optional)", "mediaFiles (multiple files, optional)"],
-      "body": {
-        "title?": "string",
-        "description?": "string",
-        "eventDate?": "ISO date string",
-        "location?": "string",
-        "status?": "draft|published",
-        "publishAt?": "ISO date string",
-        "expiresAt?": "ISO date string"
-      },
-      "description": "Updates event content, scheduling, and media. New uploads are appended to the gallery and cover image can be replaced."
-    },
-    {
-      "name": "Events - Toggle Publish (Admin Only)",
-      "method": "PATCH",
-      "url": "/events/:id/toggle-publish",
-      "authRequired": true,
-      "role": "admin",
-      "params": {
-        "id": "string (MongoId)"
-      },
-      "description": "Switches an event between draft and published states. When publishing, publishAt is auto-filled if empty."
-    },
-    {
-      "name": "Events - Delete (Admin Only)",
-      "method": "DELETE",
-      "url": "/events/:id",
-      "authRequired": true,
-      "role": "admin",
-      "params": {
-        "id": "string (MongoId)"
-      },
-      "description": "Deletes an event and attempts to clean up its Cloudinary cover/gallery assets."
-    },
+    { "name": "Users - List (Admin)", "method": "GET", "url": "/users", "authRequired": true, "role": "admin", "query": { "role?": "string", "search?": "string", "limit?": "number" }, "responseNotes": "Each user includes a computed referralCount." },
+    { "name": "Users - Stats (Admin)", "method": "GET", "url": "/users/stats", "authRequired": true, "role": "admin", "responseNotes": "{ total, users, shopkeepers, admins }" },
+    { "name": "Users - Change Role (Admin)", "method": "PUT", "url": "/users/:userId/role", "authRequired": true, "role": "admin", "params": { "userId": "string (MongoId)" }, "body": { "role": "'user' | 'shopkeeper' | 'admin'" } },
+    { "name": "Users - Delete (Admin)", "method": "DELETE", "url": "/users/:userId", "authRequired": true, "role": "admin", "params": { "userId": "string (MongoId)" }, "description": "Cannot delete your own admin account." },
 
     { "name": "Profile - Get Me", "method": "GET", "url": "/profile/me", "authRequired": true },
+    { "name": "Profile - Update", "method": "PUT", "url": "/profile/update", "authRequired": true, "contentType": "multipart/form-data", "multipartFields": ["profileImage (file, optional)"], "bodyDto": "server/src/profile/dto/update-profile.dto.ts", "requiredFields": [], "optionalFields": ["name","email","profileImage (file)"] },
+
+    { "name": "Wallet - Get My Balance", "method": "GET", "url": "/wallet/my-balance", "authRequired": true, "responseNotes": "{ balance }" },
+    { "name": "Wallet - Add Balance (Manual Request)", "method": "POST", "url": "/wallet/add-balance", "authRequired": true, "contentType": "multipart/form-data", "multipartFields": ["paymentScreenshot (file, required)"], "body": { "amount": "number (PKR, >0, <=100000)", "paymentMethod": "string", "senderName": "string", "bankName?": "string", "transactionReference?": "string", "note?": "string" }, "requiredFields": ["amount", "paymentMethod", "senderName", "paymentScreenshot"], "responseNotes": "Creates a pending deposit request. Admin approval is required before the wallet is credited - there is no automatic online payment gateway yet." },
+    { "name": "Wallet - My Deposit Requests", "method": "GET", "url": "/wallet/deposit-requests/my", "authRequired": true },
+    { "name": "Wallet - Create Withdrawal Request", "method": "POST", "url": "/wallet/withdrawal-requests", "authRequired": true, "body": { "amount": "number (>0)", "withdrawalMethod": "string", "accountTitle": "string", "accountNumber": "string", "bankName?": "string", "note?": "string" }, "requiredFields": ["amount","withdrawalMethod","accountTitle","accountNumber"], "responseNotes": "Debits the wallet immediately and creates a pending request; amount is refunded automatically if admin rejects it." },
+    { "name": "Wallet - My Withdrawal Requests", "method": "GET", "url": "/wallet/withdrawal-requests/my", "authRequired": true },
+    { "name": "Wallet - My Transactions", "method": "GET", "url": "/wallet/my-transactions", "authRequired": true, "query": { "type?": "'credit'|'debit'", "from?": "ISO date", "to?": "ISO date", "limit?": "number" } },
+    { "name": "Wallet - Pending Deposit Requests (Admin)", "method": "GET", "url": "/wallet/deposit-requests/pending", "authRequired": true, "role": "admin" },
+    { "name": "Wallet - Approve Deposit Request (Admin)", "method": "POST", "url": "/wallet/deposit-requests/:requestId/approve", "authRequired": true, "role": "admin", "params": { "requestId": "string (MongoId)" } },
+    { "name": "Wallet - Reject Deposit Request (Admin)", "method": "POST", "url": "/wallet/deposit-requests/:requestId/reject", "authRequired": true, "role": "admin", "params": { "requestId": "string (MongoId)" }, "body": { "reason?": "string" } },
+    { "name": "Wallet - Pending Withdrawal Requests (Admin)", "method": "GET", "url": "/wallet/withdrawal-requests/pending", "authRequired": true, "role": "admin" },
+    { "name": "Wallet - Mark Withdrawal Paid (Admin)", "method": "POST", "url": "/wallet/withdrawal-requests/:requestId/mark-paid", "authRequired": true, "role": "admin", "params": { "requestId": "string (MongoId)" }, "body": { "note?": "string" } },
+    { "name": "Wallet - Reject Withdrawal Request (Admin)", "method": "POST", "url": "/wallet/withdrawal-requests/:requestId/reject", "authRequired": true, "role": "admin", "params": { "requestId": "string (MongoId)" }, "body": { "reason?": "string" }, "responseNotes": "Refunds the amount back to the user's wallet." },
+    { "name": "Wallet - Get Balance By User (Admin)", "method": "GET", "url": "/wallet/:userId/balance", "authRequired": true, "role": "admin", "params": { "userId": "string (MongoId)" } },
+    { "name": "Wallet - Credit User (Admin)", "method": "POST", "url": "/wallet/:userId/credit/:amount", "authRequired": true, "role": "admin", "params": { "userId": "string (MongoId)", "amount": "number" } },
+    { "name": "Wallet - Debit User (Admin)", "method": "POST", "url": "/wallet/:userId/debit/:amount", "authRequired": true, "role": "admin", "params": { "userId": "string (MongoId)", "amount": "number" } },
+    { "name": "Wallet - Transactions By User (Admin)", "method": "GET", "url": "/wallet/:userId/transactions", "authRequired": true, "role": "admin", "params": { "userId": "string (MongoId)" } },
+
     {
-      "name": "Profile - Update",
-      "method": "PUT",
-      "url": "/profile/update",
-      "authRequired": true,
-      "contentType": "multipart/form-data",
-      "multipartFields": ["profileImage (file)"],
-      "bodyDto": "server/src/profile/dto/update-profile.dto.ts",
-      "requiredFields": [],
-      "optionalFields": ["name","email","profileImage (file)"]
-    }
-  ]
+      "_section": "MODULE 1 - Registration Lottery",
+      "_flow": "Sign up, verify email, then POST /pay once (PKR 1,500) to get a PERMANENT unique 6-digit token that never changes again. Every calendar day, POST /play opts that same token into the next draw. If it matches the draw's random 6-digit number you win PKR 1,000 to your wallet - you can keep winning indefinitely off the one-time fee.",
+      "name": "Registration Lottery - Pay Fee", "method": "POST", "url": "/registration-lottery/pay", "authRequired": true,
+      "businessLogic": "Charges PKR 1,500 from the wallet exactly once and assigns a permanent, unique 6-digit coupon stored on the user's lottery record forever. Calling again after paying just returns an already-activated message (no double charge).",
+      "responseNotes": "{ message, registrationFeePaid, couponNumber }"
+    },
+    { "name": "Registration Lottery - Play Today", "method": "POST", "url": "/registration-lottery/play", "authRequired": true, "description": "Opts the permanent token into the next draw. Only one play allowed per calendar day.", "responseNotes": "{ message, couponNumber, canPlayToday:false, nextEligiblePlayAt }" },
+    { "name": "Registration Lottery - My Info", "method": "GET", "url": "/registration-lottery/my-info", "authRequired": true, "responseNotes": "{ hasPaid, canPlayToday, nextEligiblePlayAt, lottery: { couponNumber, isActive, totalWinnings, winCount, lastPlayedAt, pendingDraw } }" },
+    { "name": "Registration Lottery - Dashboard Stats", "method": "GET", "url": "/registration-lottery/dashboard-stats", "authRequired": true, "responseNotes": "{ walletBalance, hasPaid, canPlayToday, couponNumber, totalWinnings, winCount, totalParticipants, prizePerWin, recentWins }" },
+    { "name": "Registration Lottery - Draw History", "method": "GET", "url": "/registration-lottery/draw-history", "authRequired": false, "query": { "limit?": "number" } },
+    { "name": "Registration Lottery - Next Draw", "method": "GET", "url": "/registration-lottery/next-draw", "authRequired": false, "responseNotes": "{ serverTime, nextDrawTime, countdown, drawNumber, totalParticipants, prizeAmount, lastDraw }" },
+    { "name": "Registration Lottery - Winning History", "method": "GET", "url": "/registration-lottery/winning-history", "authRequired": true },
+    { "name": "Registration Lottery - Trigger Draw (Admin)", "method": "POST", "url": "/registration-lottery/trigger-draw", "authRequired": true, "role": "admin", "description": "Manual override; the shared scheduler normally calls this every 4 minutes." },
+    { "name": "Registration Lottery - Notifications", "method": "GET", "url": "/registration-lottery/notifications", "authRequired": true, "query": { "limit?": "number" } },
+    { "name": "Registration Lottery - Unread Count", "method": "GET", "url": "/registration-lottery/notifications/unread-count", "authRequired": true },
+    { "name": "Registration Lottery - Mark Notification Read", "method": "POST", "url": "/registration-lottery/notifications/:id/read", "authRequired": true, "params": { "id": "string" } },
+    { "name": "Registration Lottery - Mark All Read", "method": "POST", "url": "/registration-lottery/notifications/mark-all-read", "authRequired": true },
+    { "name": "Registration Lottery - Delete Notification", "method": "DELETE", "url": "/registration-lottery/notifications/:id", "authRequired": true, "params": { "id": "string" } },
+
+    {
+      "_section": "MODULE 2 - Car Contribution",
+      "_flow": "1) POST /car-participation/join to activate and get a permanent 6-digit coupon (optionally pass referredByUserId). 2) POST /car-contributions to pay PKR 50-1,500 for the day (this both grows your total toward the car threshold AND earns you plays: PKR 50 = 1 play, i.e. plays = floor(amount/50)). 3) POST /car-participation/play-now to spend today's earned plays: this creates N independent play entries, and the draw runs one independent random-number check per entry, so more plays = better odds that round. 4) Reaching PKR 547,500 total paid awards the car directly; otherwise winning the random draw awards it. After winning, pay PKR 36,000/month until PKR 3,000,000 total. Referring a new user earns you 20% of every contribution they make in this module.",
+      "name": "Car Participation - Join", "method": "POST", "url": "/car-participation/join", "authRequired": true, "body": { "referredByUserId?": "string (MongoId)" }, "responseNotes": "Idempotent - returns the existing coupon if you already joined." },
+    { "name": "Car Participation - My Participation", "method": "GET", "url": "/car-participation/my-participation", "authRequired": true },
+    { "name": "Car Participation - Play Now", "method": "POST", "url": "/car-participation/play-now", "authRequired": true, "description": "Requires a same-day PRE_WIN contribution of at least PKR 50 via /car-contributions. Creates floor(todayContribution/50) independent play entries for the next draw. Fails with 'Already Played Today' if called twice in one day.", "responseNotes": "{ message, playsCount, coupenNumber, nextEligiblePlayAt }" },
+    { "name": "Car Participation - Play Status", "method": "GET", "url": "/car-participation/play-status", "authRequired": true, "responseNotes": "{ hasJoinedScheme, hasEligibleCoupon, canPlayToday, hasPlayedToday, playsToday, playsAvailableToday, statusText, coupenNumber, nextEligiblePlayAt }" },
+    { "name": "Car Participation - All Participations", "method": "GET", "url": "/car-participation/all-participations", "authRequired": false },
+
+    { "name": "Car Contributions - Create Payment", "method": "POST", "url": "/car-contributions", "authRequired": true, "bodyDto": "server/src/car-contributions/dto/car-contribution.dto.ts", "requiredFields": [ { "name": "participationId", "type": "string (MongoId)" }, { "name": "amount", "type": "number" } ], "businessLogic": "amount must be PKR 50-1,500 while in the pre-win phase, or exactly PKR 36,000 in the post-win (monthly) phase. Debits wallet, updates totalPaid, pays the referrer 20% if this user was referred, and awards the car directly once totalPaid reaches PKR 547,500.", "responseNotes": "{ contribution, participation, message }" },
+    { "name": "Car Contributions - My Contributions", "method": "GET", "url": "/car-contributions/my", "authRequired": true },
+    { "name": "Car Contributions - Stats", "method": "GET", "url": "/car-contributions/stats", "authRequired": true, "responseNotes": "{ hasJoined, participation, totalPaid, targetAmount, progressPercentage, remainingAmount, referralCode, totalReferralEarnings, referralCount, referralMembers }" },
+
+    { "name": "Car Winner - Spin (Admin)", "method": "POST", "url": "/car-winner/spin", "authRequired": true, "role": "admin", "description": "Manual override; the shared scheduler normally calls this every 4 minutes. Runs one independent random draw per pending play entry (see flow above)." },
+    { "name": "Car Winner - Next Draw", "method": "GET", "url": "/car-winner/next-draw", "authRequired": false },
+    { "name": "Car Winner - All Winners", "method": "GET", "url": "/car-winner/all", "authRequired": false },
+    { "name": "Car Winner - Draw History", "method": "GET", "url": "/car-winner/draw-history", "authRequired": false, "query": { "limit?": "number" } },
+    { "name": "Car Winner - Stats", "method": "GET", "url": "/car-winner/stats", "authRequired": false, "responseNotes": "{ totalWinners, spinnerWins, thresholdWins, totalDraws }" },
+
+    {
+      "_section": "MODULE 3 - Game",
+      "_flow": "POST /game/join pays PKR 50 once per calendar day: it either creates a brand-new token or tops up your current open (non-permanent) token. Reward for winning grows with total invested: min(invested*20, 30000) - PKR 1,000 on day 1 up to PKR 30,000 on day 30 (capped). 'Day' only advances when you actually invest, so skipped calendar days don't cost progress. Once a token hits the PKR 30,000 cap it becomes permanent and the next join call starts a fresh token at day 1. After investing for the day, call /game/play-now (or /game/auto-join-next-round) to enter that token into the next draw - one play per token per day, only after that day's investment.",
+      "name": "Game - Join / Invest", "method": "POST", "url": "/game/join", "authRequired": true, "description": "Pays PKR 50 for today. Fails with 'You have already invested today' if called twice in one calendar day.", "responseNotes": "{ message, walletBalance, token }" },
+    { "name": "Game - Play Now", "method": "POST", "url": "/game/play-now", "authRequired": true, "body": { "tokenId?": "string (MongoId)" }, "description": "Requires today's investment to already be made on the token." },
+    { "name": "Game - Auto Join Next Round", "method": "POST", "url": "/game/auto-join-next-round", "authRequired": true, "body": { "tokenId?": "string (MongoId)" } },
+    { "name": "Game - Daily Payment (Alias)", "method": "POST", "url": "/game/daily-payment", "authRequired": true, "body": { "tokenId?": "string (MongoId)" }, "description": "Alias for Play Now (does not invest money - use Join for that)." },
+    { "name": "Game - Active Cycle", "method": "GET", "url": "/game/active-cycle", "authRequired": true, "responseNotes": "{ hasCycle, cycle, activeToken, tokens[], nextEligiblePlayDate }" },
+    { "name": "Game - Savings", "method": "GET", "url": "/game/savings", "authRequired": true },
+    { "name": "Game - Coupons", "method": "GET", "url": "/game/coupons", "authRequired": true, "description": "All tokens (current + past/permanent)." },
+    { "name": "Game - Payment History", "method": "GET", "url": "/game/payment-history", "authRequired": true, "query": { "limit?": "number", "page?": "number" } },
+    { "name": "Game - Dashboard Stats", "method": "GET", "url": "/game/dashboard-stats", "authRequired": true },
+    { "name": "Game - Draw History", "method": "GET", "url": "/game/draw-history", "authRequired": false, "query": { "limit?": "number" } },
+    { "name": "Game - Next Draw", "method": "GET", "url": "/game/next-draw", "authRequired": false },
+    { "name": "Game - Winning History", "method": "GET", "url": "/game/winning-history", "authRequired": true },
+    { "name": "Game - Trigger Draw (Admin)", "method": "POST", "url": "/game/trigger-draw", "authRequired": true, "role": "admin", "description": "Manual override; the shared scheduler normally calls this every 4 minutes." },
+    { "name": "Game - Notifications", "method": "GET", "url": "/game/notifications", "authRequired": true, "query": { "limit?": "number" } },
+    { "name": "Game - Unread Count", "method": "GET", "url": "/game/notifications/unread-count", "authRequired": true },
+    { "name": "Game - Mark Notification Read", "method": "POST", "url": "/game/notifications/:id/read", "authRequired": true, "params": { "id": "string" } },
+    { "name": "Game - Mark All Read", "method": "POST", "url": "/game/notifications/mark-all-read", "authRequired": true },
+    { "name": "Game - Delete Notification", "method": "DELETE", "url": "/game/notifications/:id", "authRequired": true, "params": { "id": "string" } },
+
+    {
+      "_section": "MODULE 4 - Cashback",
+      "_flow": "Shopkeepers register their shop (PKR 1,500 fee, currently not auto-charged - see note) and go through admin approval. Customers POST /cashback/join to get a permanent 6-digit coupon, then show it to any approved shopkeeper when buying. The shopkeeper POSTs /cashback/purchase with the customer's coupon + sale amount: the FULL sale amount is added to the customer's cashback cycle (not deducted from the shopkeeper's wallet) while only a 2.5% commission is debited from the shopkeeper's wallet. Shopping amount unlocks levels (level N costs PKR N*1,000 cumulative); level 30 (PKR 465,000 total shopping) makes the coupon permanent. POST /cashback/play-today opts the coupon into the next draw once per day; a win pays currentLevel * PKR 1,000 (capped PKR 30,000, same day/level reward table as the Game module) and the cycle keeps accumulating/playing afterward instead of resetting.",
+      "name": "Cashback - Request Shopkeeper", "method": "POST", "url": "/cashback/shopkeeper/request", "authRequired": true, "bodyDto": "server/src/cashback/dto/cashback.dto.ts", "requiredFields": [ { "name": "shopName", "type": "string" }, { "name": "ownerName", "type": "string" }, { "name": "phone", "type": "string" } ], "optionalFields": [ { "name": "address", "type": "string" } ], "description": "Submits a pending shopkeeper application for admin review.", "responseNotes": "NOTE: the PKR 1,500 registration fee is currently NOT auto-charged from the wallet (payment gateway pending) - flag with the team before launch if this must be enforced. shopkeeperStatus becomes 'pending'; user.role stays 'user' until approved." },
+    { "name": "Cashback - Register Shopkeeper Direct (Admin)", "method": "POST", "url": "/cashback/shopkeeper/register-admin/:userId", "authRequired": true, "role": "admin", "params": { "userId": "string (MongoId)" }, "bodyDto": "server/src/cashback/dto/cashback.dto.ts", "description": "Deprecated direct-registration path kept for admin migrations/imports. This path DOES charge PKR 1,500 from the target user's wallet immediately." },
+    { "name": "Cashback - Approve Shopkeeper (Admin)", "method": "POST", "url": "/cashback/shopkeeper/:id/approve", "authRequired": true, "role": "admin", "params": { "id": "string (MongoId)" }, "description": "Sets shopkeeper status active and user.role to 'shopkeeper'." },
+    { "name": "Cashback - Reject Shopkeeper (Admin)", "method": "POST", "url": "/cashback/shopkeeper/:id/reject", "authRequired": true, "role": "admin", "params": { "id": "string (MongoId)" }, "body": { "reason?": "string" }, "description": "Refunds the registration fee if it had been charged (isRegistrationPaid=true)." },
+    { "name": "Cashback - Pending Shopkeepers (Admin)", "method": "GET", "url": "/cashback/shopkeeper/pending", "authRequired": true, "role": "admin" },
+    { "name": "Cashback - My Shop", "method": "GET", "url": "/cashback/shopkeeper/my-shop", "authRequired": true },
+    { "name": "Cashback - Shopkeeper Sales Overview", "method": "GET", "url": "/cashback/shopkeeper/sales-overview", "authRequired": true, "query": { "range?": "'daily'|'monthly'|'yearly'", "start?": "YYYY-MM-DD", "end?": "YYYY-MM-DD" }, "responseNotes": "Array of { period, totalSales, totalCommission, count } for charting." },
+    { "name": "Cashback - All Shopkeepers (Admin)", "method": "GET", "url": "/cashback/shopkeeper/all", "authRequired": true, "role": "admin" },
+    { "name": "Cashback - Shopkeeper Stats (Admin)", "method": "GET", "url": "/cashback/shopkeeper/stats", "authRequired": true, "role": "admin" },
+    { "name": "Cashback - Delete Shopkeeper (Admin)", "method": "DELETE", "url": "/cashback/shopkeeper/:id", "authRequired": true, "role": "admin", "params": { "id": "string (MongoId)" } },
+    { "name": "Cashback - Get Shopkeeper By Id", "method": "GET", "url": "/cashback/shopkeeper/:id", "authRequired": true, "params": { "id": "string (MongoId)" } },
+    { "name": "Cashback - Record Purchase", "method": "POST", "url": "/cashback/purchase", "authRequired": true, "role": "shopkeeper", "bodyDto": "server/src/cashback/dto/cashback.dto.ts", "requiredFields": [ { "name": "customerCoupon", "type": "string" }, { "name": "amount", "type": "number (>=1)" } ], "optionalFields": [ { "name": "shopkeeperId", "type": "string (MongoId, optional - defaults to caller's own shop)" }, { "name": "description", "type": "string" } ], "businessLogic": "Requires user.role='shopkeeper' AND shopkeeper.status='active'. Debits 2.5% commission from the shopkeeper's wallet; credits the full sale amount to the customer's cashback cycle (found by coupon).", "example": { "body": { "customerCoupon": "123456", "amount": 500, "description": "Grocery" } } },
+    { "name": "Cashback - My Purchases", "method": "GET", "url": "/cashback/purchases/my", "authRequired": true, "query": { "limit?": "number" } },
+    { "name": "Cashback - Shop Purchases", "method": "GET", "url": "/cashback/purchases/shop/:shopkeeperId", "authRequired": true, "params": { "shopkeeperId": "string" }, "query": { "limit?": "number" } },
+    { "name": "Cashback - Shopkeeper's Own Purchases", "method": "GET", "url": "/cashback/purchases/shopkeeper/:shopkeeperId", "authRequired": true, "params": { "shopkeeperId": "string" }, "query": { "limit?": "number" } },
+    { "name": "Cashback - All Purchases (Admin)", "method": "GET", "url": "/cashback/purchases/all", "authRequired": true, "role": "admin", "query": { "limit?": "number" } },
+    { "name": "Cashback - All Customer Cycles (Admin)", "method": "GET", "url": "/cashback/cycles/all", "authRequired": true, "role": "admin", "query": { "limit?": "number" } },
+    { "name": "Cashback - Join", "method": "POST", "url": "/cashback/join", "authRequired": true, "description": "Issues a new active cycle/coupon. Fails if you already have an active cycle." },
+    { "name": "Cashback - Play Today", "method": "POST", "url": "/cashback/play-today", "authRequired": true, "description": "Opts your eligible coupon (active with currentLevel>=1, or already-permanent) into the next draw. Once per calendar day." },
+    { "name": "Cashback - Active Cycle", "method": "GET", "url": "/cashback/active-cycle", "authRequired": true },
+    { "name": "Cashback - My Cycles", "method": "GET", "url": "/cashback/my-cycles", "authRequired": true, "description": "All cycles (past + current)." },
+    { "name": "Cashback - Commitment Table", "method": "GET", "url": "/cashback/commitment-table", "authRequired": true, "responseNotes": "Level-by-level (1-30) shopping commitment breakdown for the active cycle." },
+    { "name": "Cashback - Draw History", "method": "GET", "url": "/cashback/draw/history", "authRequired": false, "query": { "limit?": "number" } },
+    { "name": "Cashback - Next Draw", "method": "GET", "url": "/cashback/draw/next", "authRequired": false, "responseNotes": "serverTime, nextDrawTime, countdown, drawNumber, totalParticipants (pending plays), lastDraw." },
+    { "name": "Cashback - Winning History", "method": "GET", "url": "/cashback/draw/winning-history", "authRequired": true },
+    { "name": "Cashback - Trigger Draw (Admin)", "method": "POST", "url": "/cashback/draw/trigger", "authRequired": true, "role": "admin", "description": "Manual override; the shared scheduler normally calls this every 4 minutes." },
+    { "name": "Cashback - Dashboard Stats", "method": "GET", "url": "/cashback/dashboard-stats", "authRequired": true },
+    { "name": "Cashback - Admin Stats", "method": "GET", "url": "/cashback/admin-stats", "authRequired": true, "role": "admin" },
+    { "name": "Cashback - Notifications", "method": "GET", "url": "/cashback/notifications", "authRequired": true, "query": { "limit?": "number" } },
+    { "name": "Cashback - Unread Count", "method": "GET", "url": "/cashback/notifications/unread-count", "authRequired": true },
+    { "name": "Cashback - Mark Notification Read", "method": "POST", "url": "/cashback/notifications/:id/read", "authRequired": true, "params": { "id": "string" } },
+    { "name": "Cashback - Mark All Read", "method": "POST", "url": "/cashback/notifications/mark-all-read", "authRequired": true },
+    { "name": "Cashback - Delete Notification", "method": "DELETE", "url": "/cashback/notifications/:id", "authRequired": true, "params": { "id": "string" } },
+
+    { "name": "Events - Public Listing", "method": "GET", "url": "/events", "authRequired": false, "description": "Public events feed. Returns only published events whose publishAt is not in the future and whose expiresAt has not passed.", "query": { "page?": "number", "limit?": "number", "filter?": "upcoming|past|all" }, "responseNotes": "Default sort is by eventDate. Upcoming events are sorted ascending; past events descending." },
+    { "name": "Events - Public Detail", "method": "GET", "url": "/events/:identifier", "authRequired": false, "params": { "identifier": "string (MongoId or slug)" }, "description": "Returns 404 for drafts, future-scheduled events, or expired events." },
+    { "name": "Events - Admin Listing", "method": "GET", "url": "/events/admin", "authRequired": true, "role": "admin", "query": { "page?": "number", "limit?": "number", "search?": "string", "status?": "draft|published" } },
+    { "name": "Events - Admin Detail", "method": "GET", "url": "/events/admin/:identifier", "authRequired": true, "role": "admin", "params": { "identifier": "string (MongoId or slug)" } },
+    { "name": "Events - Create (Admin)", "method": "POST", "url": "/events", "authRequired": true, "role": "admin", "contentType": "multipart/form-data", "multipartFields": ["coverImage (file, max 1)", "mediaFiles (files, max 20)"], "body": { "title": "string", "description": "string", "eventDate": "ISO date string", "location?": "string", "status?": "draft|published", "publishAt?": "ISO date string", "expiresAt?": "ISO date string" }, "requiredFields": ["title", "description", "eventDate", "coverImage"], "responseNotes": "Max 200MB per uploaded file. Media assets stored as Cloudinary URLs + metadata." },
+    { "name": "Events - Update (Admin)", "method": "PUT", "url": "/events/:id", "authRequired": true, "role": "admin", "params": { "id": "string (MongoId)" }, "contentType": "multipart/form-data", "multipartFields": ["coverImage (file, optional)", "mediaFiles (files, optional)"], "body": { "title?": "string", "description?": "string", "eventDate?": "ISO date string", "location?": "string", "status?": "draft|published", "publishAt?": "ISO date string", "expiresAt?": "ISO date string" } },
+    { "name": "Events - Toggle Publish (Admin)", "method": "PATCH", "url": "/events/:id/toggle-publish", "authRequired": true, "role": "admin", "params": { "id": "string (MongoId)" } },
+    { "name": "Events - Delete (Admin)", "method": "DELETE", "url": "/events/:id", "authRequired": true, "role": "admin", "params": { "id": "string (MongoId)" } }
+  ],
+  "businessRulesCheatSheet": {
+    "registrationLottery": { "entryFee": "PKR 1,500 one-time", "reward": "PKR 1,000 per win, unlimited wins off one fee", "token": "permanent, assigned at payment", "playFrequency": "1 play per calendar day" },
+    "carContribution": { "dailyContribution": "PKR 50-1,500/day", "playsPerDay": "floor(amount/50) independent draw chances", "carValue": "PKR 3,000,000", "directAwardThreshold": "PKR 547,500 total paid", "postWinMonthly": "PKR 36,000/month until PKR 3,000,000 total", "referralBonus": "20% of every contribution made by a referred user" },
+    "game": { "dailyInvestment": "PKR 50/day, once per calendar day", "rewardFormula": "min(totalInvested * 20, 30000)", "rewardTable": "day1=1000, day2=2000, ... day30=30000 (capped)", "permanentAt": "reward reaches PKR 30,000 (30 paid days); next join starts a new token" },
+    "cashback": { "shopRegistrationFee": "PKR 1,500 (not currently auto-charged - see note on shopkeeper/request)", "commission": "2.5% of each sale, debited from shopkeeper wallet only", "levelCost": "level N costs PKR N*1,000 cumulative", "permanentAt": "level 30 / PKR 465,000 cumulative shopping", "rewardFormula": "currentLevel * PKR 1,000, capped PKR 30,000", "playFrequency": "1 play per calendar day" },
+    "drawScheduler": "One shared cron tick every minute rotates Registration Lottery -> Car Contribution -> Game -> Cashback, so each module's draw fires once every 4 minutes, staggered 1 minute apart. Rotation slot = floor(unixMinute) % 4, so restarts don't desync the sequence."
+  }
 }
 ```

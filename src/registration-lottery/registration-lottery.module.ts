@@ -2,7 +2,6 @@ import { Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
 import { RegistrationLotteryController } from './registration-lottery.controller';
 import { RegistrationLotteryService } from './registration-lottery.service';
-import { RegistrationDrawScheduler } from './registration-draw.scheduler';
 import { RegistrationLottery, RegistrationLotterySchema } from './schemas/registration-lottery.schema';
 import { RegistrationDraw, RegistrationDrawSchema } from './schemas/registration-draw.schema';
 import { RegistrationNotification, RegistrationNotificationSchema } from './schemas/registration-notification.schema';
@@ -20,7 +19,7 @@ import { UsersModule } from '../users/users.module';
     UsersModule,
   ],
   controllers: [RegistrationLotteryController],
-  providers: [RegistrationLotteryService, RegistrationDrawScheduler],
+  providers: [RegistrationLotteryService],
   exports: [RegistrationLotteryService],
 })
 export class RegistrationLotteryModule {}

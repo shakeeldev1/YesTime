@@ -10,6 +10,8 @@ import {
 } from '@nestjs/common';
 import { RegistrationLotteryService } from './registration-lottery.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { RolesGuard } from '../auth/guards/roles.guard';
+import { Roles } from '../auth/decorators/roles.decorator';
 
 @Controller('registration-lottery')
 export class RegistrationLotteryController {
@@ -55,7 +57,8 @@ export class RegistrationLotteryController {
     return this.service.getWinningHistory(req.user.userId);
   }
 
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('admin')
   @Post('trigger-draw')
   async triggerDraw() {
     return this.service.executeLuckyDraw();

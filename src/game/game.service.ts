@@ -34,44 +34,15 @@ export class GameService {
     return String(Math.floor(100000 + Math.random() * 900000));
   }
 
-  private getMonthKey(date = new Date()): string {
-    return `${date.getFullYear()}-${date.getMonth() + 1}`;
-  }
-
-  private getDaysInMonth(date = new Date()): number {
-    return new Date(date.getFullYear(), date.getMonth() + 1, 0).getDate();
-  }
-
-  private getCycleDateForToday(date = new Date()): number {
-    return Math.min(date.getDate(), this.getDaysInMonth(date));
-  }
-
   private normalizeDate(date: Date): Date {
     const normalized = new Date(date);
     normalized.setHours(0, 0, 0, 0);
     return normalized;
   }
 
-  private getEligibleDateForMonth(cycleDate: number, referenceDate = new Date()): Date {
-    const day = Math.min(cycleDate, this.getDaysInMonth(referenceDate));
-    return this.normalizeDate(new Date(referenceDate.getFullYear(), referenceDate.getMonth(), day));
-  }
-
-  private getNextEligiblePlayDateForToken(token: GameCycle, referenceDate = new Date()): Date {
-    const currentEligibleDate = this.getEligibleDateForMonth(this.getCycleDateValue(token), referenceDate);
-    const today = this.normalizeDate(referenceDate);
-    const playedThisMonth = this.wasPlayedThisMonth(token, referenceDate);
-
-    if (!playedThisMonth && currentEligibleDate.getTime() >= today.getTime()) {
-      return currentEligibleDate;
-    }
-
-    const nextMonth = new Date(referenceDate.getFullYear(), referenceDate.getMonth() + 1, 1);
-    return this.getEligibleDateForMonth(this.getCycleDateValue(token), nextMonth);
-  }
-
-  private getCycleDateValue(token: GameCycle): number {
-    return Number((token as any).cycleDate || new Date((token as any).cycleStartDate || Date.now()).getDate());
+  private isSameDay(a?: Date | null, b: Date = new Date()): boolean {
+    if (!a) return false;
+    return this.normalizeDate(new Date(a)).getTime() === this.normalizeDate(b).getTime();
   }
 
   private getTokenInvestedValue(token: GameCycle): number {
@@ -83,8 +54,6 @@ export class GameService {
   }
 
   private getTokenRewardValue(token: GameCycle): number {
-    const explicitReward = Number((token as any).currentReward || 0);
-    if (explicitReward > 0) return explicitReward;
     const invested = this.getTokenInvestedValue(token);
     return Math.min(invested * 20, this.MAX_REWARD);
   }
@@ -98,50 +67,59 @@ export class GameService {
     return Boolean((token as any).isPermanent) || this.getTokenRewardValue(token) >= this.MAX_REWARD;
   }
 
-  private wasPlayedThisMonth(token: GameCycle, referenceDate = new Date()): boolean {
-    const lastMonth = Number((token as any).lastPlayedMonth || 0);
-    const lastYear = Number((token as any).lastPlayedYear || 0);
-    if (lastMonth !== referenceDate.getMonth() + 1 || lastYear !== referenceDate.getFullYear()) return false;
-    const playsUsed = Number((token as any).playsUsedThisCycle || 0);
-    if (playsUsed > 0) return true;
-    return Boolean((token as any).hasPlayedCurrentCycle);
+  // A token can only be invested in (paid for) once per calendar day.
+  private hasInvestedToday(token: GameCycle, referenceDate = new Date()): boolean {
+    return this.isSameDay((token as any).lastPaymentDate, referenceDate);
   }
 
-  private canParticipateToday(token: GameCycle, referenceDate = new Date()): boolean {
-    const today = this.normalizeDate(referenceDate);
-    const eligibleDate = this.getEligibleDateForMonth(this.getCycleDateValue(token), referenceDate);
-    if (eligibleDate.getTime() !== today.getTime()) return false;
-
-    // Determine remaining plays: plays purchased - plays used in this cycle
-    const purchased = Math.floor(this.getTokenInvestedValue(token) / this.INVESTMENT_AMOUNT);
-    const playsUsed = this.wasPlayedThisMonth(token, referenceDate) ? Number((token as any).playsUsedThisCycle || 0) : 0;
-    const remaining = purchased - playsUsed;
-    return remaining > 0 && !this.isQueued(token);
+  // A token can only be played (entered into a draw) once per calendar day, and only
+  // after today's investment has been made.
+  private hasPlayedToday(token: GameCycle, referenceDate = new Date()): boolean {
+    return this.isSameDay((token as any).lastParticipatedAt, referenceDate);
   }
 
   private isQueued(token: GameCycle): boolean {
     return Boolean((token as any).queuedForNextRound);
   }
 
-  private isEligibleForAction(token: GameCycle, referenceDate = new Date()): boolean {
-    return this.canParticipateToday(token, referenceDate) && !this.isQueued(token);
+  private canParticipateToday(token: GameCycle, referenceDate = new Date()): boolean {
+    if (this.isPermanentToken(token)) return false;
+    if (this.isQueued(token)) return false;
+    if (!this.hasInvestedToday(token, referenceDate)) return false;
+    if (this.hasPlayedToday(token, referenceDate)) return false;
+    return true;
+  }
+
+  private getNextEligiblePlayDateForToken(token: GameCycle, referenceDate = new Date()): Date {
+    if (this.isPermanentToken(token)) {
+      return this.normalizeDate(referenceDate);
+    }
+    if (!this.hasInvestedToday(token, referenceDate) || !this.hasPlayedToday(token, referenceDate)) {
+      // Either today's investment hasn't been made yet, or it has but hasn't been played yet.
+      // Either way, the next actionable date is today.
+      return this.normalizeDate(referenceDate);
+    }
+    const tomorrow = new Date(referenceDate);
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    return this.normalizeDate(tomorrow);
   }
 
   private getTokenStatus(token: GameCycle, referenceDate = new Date()): string {
     if (this.isQueued(token)) return 'queued';
-    if (this.wasPlayedThisMonth(token, referenceDate)) return 'played';
     if (this.isPermanentToken(token)) return 'permanent';
+    if (this.hasPlayedToday(token, referenceDate)) return 'played';
     return 'active';
   }
 
   private buildTokenView(token: GameCycle, referenceDate = new Date()) {
     const invested = this.getTokenInvestedValue(token);
     const reward = this.getTokenRewardValue(token);
-    const eligibleDate = this.getEligibleDateForMonth(this.getCycleDateValue(token), referenceDate);
     const nextEligiblePlayDate = this.getNextEligiblePlayDateForToken(token, referenceDate);
     const currentDay = this.getCurrentDayValue(token);
     const eligibleToday = this.canParticipateToday(token, referenceDate);
     const queued = this.isQueued(token);
+    const investedToday = this.hasInvestedToday(token, referenceDate);
+    const playedToday = this.hasPlayedToday(token, referenceDate);
 
     return {
       id: token._id,
@@ -149,8 +127,7 @@ export class GameService {
       tokenNumber: (token as any).tokenNumber || token.couponNumber,
       couponNumber: token.couponNumber,
       userId: token.userId,
-      cycleDate: this.getCycleDateValue(token),
-      cycleDateLabel: eligibleDate.toISOString().slice(0, 10),
+      cycleDateLabel: this.normalizeDate((token as any).cycleStartDate || new Date()).toISOString().slice(0, 10),
       totalInvested: invested,
       totalSavings: invested,
       currentReward: reward,
@@ -159,26 +136,24 @@ export class GameService {
       totalLosses: Number((token as any).totalLosses || 0),
       isPermanent: this.isPermanentToken(token),
       permanentPrizeAmount: Number((token as any).permanentPrizeAmount || (this.isPermanentToken(token) ? this.MAX_REWARD : 0)),
-      lastPlayedMonth: (token as any).lastPlayedMonth || null,
-      lastPlayedYear: (token as any).lastPlayedYear || null,
       autoJoinEnabledForCurrentCycle: Boolean((token as any).autoJoinEnabledForCurrentCycle),
-      hasPlayedCurrentCycle: this.wasPlayedThisMonth(token, referenceDate),
-      playsPurchased: Math.floor(invested / this.INVESTMENT_AMOUNT),
-      playsUsed: this.wasPlayedThisMonth(token, referenceDate) ? Number((token as any).playsUsedThisCycle || 0) : 0,
-      playsRemaining: Math.max(0, Math.floor(invested / this.INVESTMENT_AMOUNT) - (this.wasPlayedThisMonth(token, referenceDate) ? Number((token as any).playsUsedThisCycle || 0) : 0)),
+      hasPlayedCurrentCycle: playedToday,
+      playsPurchased: investedToday ? 1 : 0,
+      playsUsed: playedToday ? 1 : 0,
+      playsRemaining: investedToday && !playedToday ? 1 : 0,
       queuedForNextRound: queued,
       participationMode: (token as any).participationMode || 'none',
       currentDay,
       daysLeft: Math.max(0, 30 - currentDay),
       status: this.getTokenStatus(token, referenceDate),
-      cycleStartDate: (token as any).cycleStartDate || new Date((token as any).cycleDate ? new Date().setDate(Number((token as any).cycleDate)) : Date.now()),
-      cycleEndDate: (token as any).cycleEndDate || nextEligiblePlayDate,
+      cycleStartDate: (token as any).cycleStartDate || null,
+      cycleEndDate: (token as any).cycleEndDate || null,
       lastPaymentDate: (token as any).lastPaymentDate || null,
       nextEligiblePlayDate,
       canPlayNow: eligibleToday,
       canAutoJoin: eligibleToday,
-      canInvestToday: true,
-      playStatus: queued ? 'queued' : eligibleToday ? 'eligible' : 'locked',
+      canInvestToday: !investedToday && !this.isPermanentToken(token),
+      playStatus: queued ? 'queued' : eligibleToday ? 'eligible' : this.isPermanentToken(token) ? 'permanent' : 'locked',
     };
   }
 
@@ -189,19 +164,6 @@ export class GameService {
     const payment = new this.paymentModel(data as any);
     await payment.save({ session: session || undefined });
     return payment;
-  }
-
-  private async syncPermanentToken(token: GameCycle, session: ClientSession | null = null) {
-    const reward = this.getTokenRewardValue(token);
-    if (reward >= this.MAX_REWARD) {
-      (token as any).isPermanent = true;
-      (token as any).permanentPrizeAmount = this.MAX_REWARD;
-    } else {
-      (token as any).isPermanent = false;
-      (token as any).permanentPrizeAmount = 0;
-    }
-    await token.save({ session: session || undefined });
-    return token;
   }
 
   private async findMostRelevantToken(userId: string, tokenId?: string) {
@@ -223,49 +185,52 @@ export class GameService {
     return tokens[0] || null;
   }
 
+  // Pay today's PKR 50 investment. Upgrades the user's currently open (non-permanent)
+  // token, or creates a brand new one if none exists yet / the previous one is permanent.
   async joinGame(userId: string) {
     const now = new Date();
-    const cycleDate = this.getCycleDateForToday(now);
     const session = await this.cycleModel.db.startSession();
 
     try {
       let tokenResult: GameCycle | null = null;
 
       await session.withTransaction(async () => {
-        await this.walletService.debit(userId, this.INVESTMENT_AMOUNT, 'Token investment', session);
-
-        const existingToken = await this.cycleModel
-          .findOne({ userId, cycleDate })
+        const existingOpenToken = await this.cycleModel
+          .findOne({ userId, isPermanent: false })
           .sort({ createdAt: -1 })
           .session(session);
 
-        const existingReward = existingToken ? this.getTokenRewardValue(existingToken) : 0;
-        const shouldUpgradeExisting = Boolean(existingToken && existingReward < this.MAX_REWARD);
+        if (existingOpenToken && this.hasInvestedToday(existingOpenToken, now)) {
+          throw new BadRequestException('You have already invested today. Come back tomorrow.');
+        }
 
-        if (shouldUpgradeExisting && existingToken) {
-          const nextInvested = this.getTokenInvestedValue(existingToken) + this.INVESTMENT_AMOUNT;
-          existingToken.set({
-            tokenNumber: (existingToken as any).tokenNumber || existingToken.couponNumber,
-            cycleDate,
+        await this.walletService.debit(userId, this.INVESTMENT_AMOUNT, 'Token investment', session);
+
+        if (existingOpenToken) {
+          const nextInvested = this.getTokenInvestedValue(existingOpenToken) + this.INVESTMENT_AMOUNT;
+          const nextReward = Math.min(nextInvested * 20, this.MAX_REWARD);
+          existingOpenToken.set({
+            tokenNumber: (existingOpenToken as any).tokenNumber || existingOpenToken.couponNumber,
             totalInvested: nextInvested,
-            currentReward: Math.min(nextInvested * 20, this.MAX_REWARD),
+            currentReward: nextReward,
             currentDay: Math.max(1, Math.ceil(nextInvested / this.INVESTMENT_AMOUNT)),
             totalSavings: nextInvested,
             dailyAmount: this.INVESTMENT_AMOUNT,
             cycleDays: 30,
             status: 'active',
-            isPermanent: Math.min(nextInvested * 20, this.MAX_REWARD) >= this.MAX_REWARD,
-            permanentPrizeAmount: Math.min(nextInvested * 20, this.MAX_REWARD) >= this.MAX_REWARD ? this.MAX_REWARD : 0,
-            nextEligiblePlayDate: this.getNextEligiblePlayDateForToken(existingToken, now),
+            lastPaymentDate: now,
+            paymentDates: [...(((existingOpenToken as any).paymentDates as Date[]) || []), now],
+            isPermanent: nextReward >= this.MAX_REWARD,
+            permanentPrizeAmount: nextReward >= this.MAX_REWARD ? this.MAX_REWARD : 0,
           });
-          tokenResult = await this.syncPermanentToken(existingToken, session);
+          tokenResult = await existingOpenToken.save({ session });
         } else {
           const tokenNumber = this.generateCoupon();
           const newToken = new this.cycleModel({
             userId,
             couponNumber: tokenNumber,
             tokenNumber,
-            cycleDate,
+            cycleDate: 1,
             totalInvested: this.INVESTMENT_AMOUNT,
             currentReward: Math.min(this.INVESTMENT_AMOUNT * 20, this.MAX_REWARD),
             totalWins: 0,
@@ -276,7 +241,6 @@ export class GameService {
             cycleDays: 30,
             status: 'active',
             cycleStartDate: now,
-            cycleEndDate: this.getEligibleDateForMonth(cycleDate, new Date(now.getFullYear(), now.getMonth() + 1, 1)),
             isPermanent: false,
             permanentPrizeAmount: 0,
             lastPaymentDate: now,
@@ -286,8 +250,7 @@ export class GameService {
             queuedForNextRound: false,
             participationMode: 'none',
           });
-          newToken.set({ nextEligiblePlayDate: this.getNextEligiblePlayDateForToken(newToken, now) });
-          tokenResult = await this.syncPermanentToken(newToken, session);
+          tokenResult = await newToken.save({ session });
         }
 
         if (!tokenResult) {
@@ -300,7 +263,7 @@ export class GameService {
           couponNumber: tokenResult.couponNumber,
           tokenId: tokenResult._id.toString(),
           tokenNumber: (tokenResult as any).tokenNumber || tokenResult.couponNumber,
-          cycleDate,
+          cycleDate: this.getCurrentDayValue(tokenResult),
           amount: this.INVESTMENT_AMOUNT,
           dayNumber: this.getCurrentDayValue(tokenResult),
           action: 'investment',
@@ -330,10 +293,8 @@ export class GameService {
     }
 
     if (!this.canParticipateToday(token, now)) {
-      throw new BadRequestException('This token can only play on its monthly cycle date.');
+      throw new BadRequestException('You need to invest today before you can play. Call join to invest ₹50, then play.');
     }
-
-    // allow multiple participations per cycle if user has remaining plays
 
     if (this.isQueued(token) && (token as any).participationMode === 'auto') {
       throw new BadRequestException('Auto join is already enabled for this token.');
@@ -350,7 +311,6 @@ export class GameService {
       queuedForNextRound: true,
       participationMode: 'play',
       autoJoinEnabledForCurrentCycle: false,
-      nextEligiblePlayDate: this.getNextEligiblePlayDateForToken(token, now),
     });
     await token.save();
 
@@ -368,10 +328,8 @@ export class GameService {
     }
 
     if (!this.canParticipateToday(token, now)) {
-      throw new BadRequestException('This token can only auto-join on its monthly cycle date.');
+      throw new BadRequestException('You need to invest today before you can auto-join. Call join to invest ₹50, then auto-join.');
     }
-
-    // allow multiple participations per cycle if user has remaining plays
 
     if ((token as any).queuedForNextRound && (token as any).participationMode === 'play') {
       throw new BadRequestException('Play Now is already queued for this token.');
@@ -388,7 +346,6 @@ export class GameService {
       queuedForNextRound: true,
       autoJoinEnabledForCurrentCycle: true,
       participationMode: 'auto',
-      nextEligiblePlayDate: this.getNextEligiblePlayDateForToken(token, now),
     });
     await token.save();
 
@@ -501,22 +458,9 @@ export class GameService {
 
           await this.walletService.credit(winnerToken.userId, prizeAmount, 'Game token win', session);
 
-          // Increment per-cycle plays used counter
-          const prevMonth = Number((winnerToken as any).lastPlayedMonth || 0);
-          const prevYear = Number((winnerToken as any).lastPlayedYear || 0);
-          let playsUsed = Number((winnerToken as any).playsUsedThisCycle || 0);
-          if (prevMonth === now.getMonth() + 1 && prevYear === now.getFullYear()) {
-            playsUsed += 1;
-          } else {
-            playsUsed = 1;
-          }
-
           winnerToken.set({
             totalWins: Number((winnerToken as any).totalWins || 0) + 1,
             hasPlayedCurrentCycle: true,
-            lastPlayedMonth: now.getMonth() + 1,
-            lastPlayedYear: now.getFullYear(),
-            playsUsedThisCycle: playsUsed,
             lastParticipatedAt: now,
             queuedForNextRound: false,
             autoJoinEnabledForCurrentCycle: false,
@@ -553,32 +497,15 @@ export class GameService {
             continue;
           }
 
-          // Increment per-cycle plays used counter for this token
-          const prevMonth = Number((token as any).lastPlayedMonth || 0);
-          const prevYear = Number((token as any).lastPlayedYear || 0);
-          let playsUsed = Number((token as any).playsUsedThisCycle || 0);
-          if (prevMonth === now.getMonth() + 1 && prevYear === now.getFullYear()) {
-            playsUsed += 1;
-          } else {
-            playsUsed = 1;
-          }
-
           token.set({
             totalLosses: Number((token as any).totalLosses || 0) + 1,
             hasPlayedCurrentCycle: true,
-            lastPlayedMonth: now.getMonth() + 1,
-            lastPlayedYear: now.getFullYear(),
-            playsUsedThisCycle: playsUsed,
             lastParticipatedAt: now,
             queuedForNextRound: false,
             autoJoinEnabledForCurrentCycle: false,
             participationMode: 'none',
           });
           await token.save({ session });
-        }
-
-        for (const token of queuedTokens) {
-          await this.syncPermanentToken(token, session);
         }
 
         const draw = new this.drawModel({

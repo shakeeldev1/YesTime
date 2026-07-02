@@ -20,6 +20,10 @@ export class RegistrationLottery extends Document {
 
   @Prop()
   lastPlayedAt?: Date;
+
+  // True once the user has opted in ("played") for today and until the next draw consumes it.
+  @Prop({ default: false })
+  pendingDraw!: boolean;
 }
 
 export const RegistrationLotterySchema = SchemaFactory.createForClass(RegistrationLottery);

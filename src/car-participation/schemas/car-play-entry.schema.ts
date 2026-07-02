@@ -29,5 +29,7 @@ export class CarPlayEntry extends Document {
 }
 
 export const CarPlayEntrySchema = SchemaFactory.createForClass(CarPlayEntry);
-CarPlayEntrySchema.index({ userId: 1, playDateKey: 1 }, { unique: true });
+// Not unique: a user can hold multiple play entries for the same day when their
+// daily contribution amount buys more than one play (PKR 50 = 1 play).
+CarPlayEntrySchema.index({ userId: 1, playDateKey: 1 });
 CarPlayEntrySchema.index({ status: 1, playDateKey: 1 });

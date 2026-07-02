@@ -766,22 +766,22 @@ export class CashbackService {
     let winnerCoupon: string | undefined;
 
     if (winner) {
-      // Prize = the customer's total shopping amount in their cashback wallet
-      prizeAmount = winner.totalShopping;
+      // Prize follows the same day/level reward table as the other modules:
+      // level 1 = PKR 1,000, level 2 = PKR 2,000, ... level 30 = PKR 30,000 (capped).
+      prizeAmount = Math.min(winner.currentLevel, this.MAX_LEVELS) * this.LEVEL_BASE;
       winnerUserId = winner.customerId.toString();
       winnerCoupon = winner.couponNumber;
 
       // Credit the prize to the winner's main wallet
       await this.walletService.credit(winnerUserId, prizeAmount);
 
-      // Mark the cycle as won (customer can still participate with this coupon until they join new cycle)
-      winner.status = 'won';
+      // The cycle keeps accumulating shopping and stays in the draw pool after a win;
+      // it only becomes permanent/completed once totalShopping reaches the level-30 threshold
+      // (handled in recordPurchase). We just record the win on the existing cycle.
       winner.wonDate = new Date();
-      winner.wonAmount = prizeAmount;
+      winner.wonAmount += prizeAmount;
+      winner.winCount = Number(winner.winCount || 0) + 1;
       await winner.save();
-
-      // Create a new active cycle for the customer so they can continue shopping
-      await this.createNewCycle(winnerUserId);
 
       // Notify winner
       await this.createNotification(

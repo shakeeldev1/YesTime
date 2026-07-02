@@ -25,27 +25,61 @@ export class CarWinnerService {
 
     async spinAndSelectWinner() {
         const pendingPlayEntries = await this.carPlayEntryModel.find({ status: 'pending' });
-        const pendingCoupons = pendingPlayEntries.map((entry) => entry.coupenNumber);
+        const drawDate = new Date();
+
+        if (pendingPlayEntries.length === 0) {
+            const winningCoupon = this.generateRandom6DigitCoupon();
+            await this.spinnerDrawModel.deleteMany({});
+            const spinnerDraw = new this.spinnerDrawModel({
+                drawDate,
+                winningCoupen: winningCoupon,
+                status: 'completed',
+                spinStartTime: drawDate,
+                spinEndTime: new Date(),
+            } as any);
+            await spinnerDraw.save();
+            return { message: 'No participants in this draw', winner: null, winningCoupon };
+        }
 
         const eligibleParticipations = await this.carParticipationModel.find({
             status: ParticipationStatus.ACTIVE,
             phase: ParticipationPhase.PRE_WIN,
             hasWon: false,
             carAwarded: false,
-            coupenNumber: { $in: pendingCoupons },
+            coupenNumber: { $in: pendingPlayEntries.map((entry) => entry.coupenNumber) },
         }).populate('userId');
 
-        const drawDate = new Date();
-        const winningCoupon = this.generateRandom6DigitCoupon();
-        let winner: any = null;
+        const eligibleCoupons = new Set(eligibleParticipations.map((participant) => participant.coupenNumber));
 
-        if (eligibleParticipations.length > 0) {
-            winner = eligibleParticipations.find((participant) => participant.coupenNumber === winningCoupon) || null;
+        // Each pending play entry is one independent chance: draw a fresh random 6-digit
+        // number for every entry and compare it against that entry's fixed coupon. More
+        // plays purchased that day (PKR 50 = 1 play) means more independent draws this round.
+        const shuffledEntries = [...pendingPlayEntries].sort(() => Math.random() - 0.5);
+
+        let winningCoupon = '';
+        let winnerCoupenNumber: string | null = null;
+        const consumedIds = shuffledEntries.map((entry) => entry._id);
+
+        for (const entry of shuffledEntries) {
+            if (winnerCoupenNumber) continue; // car already awarded this round; just consume remaining plays
+            if (!eligibleCoupons.has(entry.coupenNumber)) continue;
+
+            const drawnNumber = this.generateRandom6DigitCoupon();
+            winningCoupon = drawnNumber;
+            if (entry.coupenNumber === drawnNumber) {
+                winnerCoupenNumber = entry.coupenNumber;
+            }
         }
 
-        // Record only the latest spinner draw (delete previous to keep one document)
-        const latestPrev = await this.spinnerDrawModel.findOne().sort({ drawDate: -1 });
+        if (!winningCoupon) {
+            winningCoupon = this.generateRandom6DigitCoupon();
+        }
 
+        const winner = winnerCoupenNumber
+            ? eligibleParticipations.find((participant) => participant.coupenNumber === winnerCoupenNumber) || null
+            : null;
+
+        // Record only the latest spinner draw (delete previous to keep one document)
         const spinnerDoc = {
             drawDate,
             winningCoupen: winningCoupon,
@@ -62,7 +96,7 @@ export class CarWinnerService {
         console.debug('[CarWinner] spinnerSaved (only latest kept)', { winningCoupen: spinnerDraw.winningCoupen, drawDate: spinnerDraw.drawDate });
 
         await this.carPlayEntryModel.updateMany(
-            { _id: { $in: pendingPlayEntries.map((entry) => entry._id) }, status: 'pending' },
+            { _id: { $in: consumedIds }, status: 'pending' },
             { $set: { status: 'consumed', consumedAt: new Date(), consumedInDrawDate: drawDate } },
         );
 
@@ -71,6 +105,7 @@ export class CarWinnerService {
                 message: 'No winner in this draw',
                 winner: null,
                 winningCoupon,
+                totalPlaysThisRound: pendingPlayEntries.length,
             };
         }
 

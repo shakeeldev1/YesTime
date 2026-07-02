@@ -2,7 +2,6 @@ import { Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
 import { CashbackController } from './cashback.controller';
 import { CashbackService } from './cashback.service';
-import { CashbackDrawScheduler } from './cashback-draw.scheduler';
 import { Shopkeeper, ShopkeeperSchema } from './schemas/shopkeeper.schema';
 import { CashbackPurchase, CashbackPurchaseSchema } from './schemas/cashback-purchase.schema';
 import { CashbackCycle, CashbackCycleSchema } from './schemas/cashback-cycle.schema';
@@ -26,7 +25,7 @@ import { UsersModule } from '../users/users.module';
     UsersModule,
   ],
   controllers: [CashbackController],
-  providers: [CashbackService, CashbackDrawScheduler],
+  providers: [CashbackService],
   exports: [CashbackService],
 })
 export class CashbackModule {}

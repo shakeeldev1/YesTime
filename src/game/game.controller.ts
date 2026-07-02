@@ -11,6 +11,8 @@ import {
 } from '@nestjs/common';
 import { GameService } from './game.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { RolesGuard } from '../auth/guards/roles.guard';
+import { Roles } from '../auth/decorators/roles.decorator';
 
 @Controller('game')
 export class GameController {
@@ -98,8 +100,9 @@ export class GameController {
     return this.gameService.getWinningHistory(req.user.userId);
   }
 
-  // Manual draw trigger (for testing)
-  @UseGuards(JwtAuthGuard)
+  // Manual draw trigger (admin only; the scheduler is what normally calls this)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('admin')
   @Post('trigger-draw')
   async triggerDraw() {
     return this.gameService.triggerManualDraw();

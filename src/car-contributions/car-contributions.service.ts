@@ -11,7 +11,7 @@ import { MailerService } from 'src/mailer/mailer.service';
 const PRE_WIN_MIN = 50;
 const PRE_WIN_MAX = 1500;
 const POST_WIN_MONTHLY = 36000;
-const THRESHOLD_AMOUNT = 465500; // Updated from 546000 to 465500
+const THRESHOLD_AMOUNT = 547500;
 const CAR_PRICE = 3000000;
 const REFERRAL_PERCENTAGE = 0.20; // 20% referral bonus (300/1500 = 20%)
 
@@ -105,8 +105,8 @@ export class CarContributionsService {
         return {
             contribution,
             participation: carParticipation,
-            message: carAwardedNow 
-                ? 'Congratulations! You have reached PKR 4,65,500 and been awarded a car! Your monthly payment is now PKR 36,000.' 
+            message: carAwardedNow
+                ? `Congratulations! You have reached PKR ${THRESHOLD_AMOUNT.toLocaleString()} and been awarded a car! Your monthly payment is now PKR 36,000.`
                 : 'Payment successful'
         };
     }

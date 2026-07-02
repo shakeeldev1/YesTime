@@ -35,6 +35,9 @@ export class CashbackCycle extends Document {
 
   @Prop({ default: 0 })
   wonAmount!: number;
+
+  @Prop({ default: 0 })
+  winCount!: number;
 }
 
 export const CashbackCycleSchema = SchemaFactory.createForClass(CashbackCycle);

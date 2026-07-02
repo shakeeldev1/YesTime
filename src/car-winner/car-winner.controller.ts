@@ -1,12 +1,16 @@
 import { Controller, Get, Post, Query, UseGuards } from '@nestjs/common';
 import { JwtAuthGuard } from 'src/auth/guards/jwt-auth.guard';
+import { RolesGuard } from 'src/auth/guards/roles.guard';
+import { Roles } from 'src/auth/decorators/roles.decorator';
 import { CarWinnerService } from './car-winner.service';
 
 @Controller('car-winner')
 export class CarWinnerController {
     constructor(private readonly carWinnerService: CarWinnerService) { }
 
-    // Admin only - can be protected separately if needed
+    // Admin only (manual trigger; the scheduler is what normally calls this)
+    @UseGuards(JwtAuthGuard, RolesGuard)
+    @Roles('admin')
     @Post('spin')
     async spinWinner() {
         return this.carWinnerService.spinAndSelectWinner();
