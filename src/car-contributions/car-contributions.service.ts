@@ -50,8 +50,8 @@ export class CarContributionsService {
         await wallet.save();
 
         const contribution = new this.carContributionModel({
-            carParticipationId,
-            userId,
+            carParticipationId: new Types.ObjectId(carParticipationId),
+            userId: new Types.ObjectId(userId),
             amount
         });
         await contribution.save();

@@ -79,8 +79,12 @@ export class CarParticipationService {
     // independent play chances (PKR 50 = 1 play) they've earned today.
     private async getTodaysContributionAmount(userId: string, now: Date): Promise<number> {
         const { start, end } = this.getUtcDayRange(now);
+        const userIdFilter = [userId];
+        if (Types.ObjectId.isValid(userId)) {
+            userIdFilter.unshift(new Types.ObjectId(userId));
+        }
         const result = await this.carContributionModel.aggregate([
-            { $match: { userId: new Types.ObjectId(userId), createdAt: { $gte: start, $lt: end } } },
+            { $match: { userId: { $in: userIdFilter }, createdAt: { $gte: start, $lt: end } } },
             { $group: { _id: null, total: { $sum: '$amount' } } },
         ]);
         return result[0]?.total || 0;
