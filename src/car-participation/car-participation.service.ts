@@ -79,7 +79,7 @@ export class CarParticipationService {
     // independent play chances (PKR 50 = 1 play) they've earned today.
     private async getTodaysContributionAmount(userId: string, now: Date): Promise<number> {
         const { start, end } = this.getUtcDayRange(now);
-        const userIdFilter = [userId];
+        const userIdFilter: Array<string | Types.ObjectId> = [userId];
         if (Types.ObjectId.isValid(userId)) {
             userIdFilter.unshift(new Types.ObjectId(userId));
         }
