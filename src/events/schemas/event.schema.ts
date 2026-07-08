@@ -1,5 +1,5 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { Document, Types } from 'mongoose';
+import { Document, Schema as MongooseSchema, Types } from 'mongoose';
 
 @Schema({ _id: false })
 export class EventMediaAsset {
@@ -53,7 +53,7 @@ export class Event extends Document {
   @Prop()
   expiresAt?: Date;
 
-  @Prop({ type: Types.ObjectId, ref: 'User' })
+  @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'User' })
   createdBy?: Types.ObjectId;
 }
 

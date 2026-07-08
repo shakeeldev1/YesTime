@@ -1,5 +1,5 @@
 import { Prop, Schema, SchemaFactory } from "@nestjs/mongoose";
-import { Types } from "mongoose";
+import { Schema as MongooseSchema, Types } from "mongoose";
 
 export enum ParticipationPhase {
     PRE_WIN = 'pre-win', // Paying 50-1500/day
@@ -15,7 +15,7 @@ export enum ParticipationStatus {
 
 @Schema({timestamps:true})
 export class CarParticipation {
-    @Prop({required:true,type:Types.ObjectId,ref:'User'})
+    @Prop({required:true,type:MongooseSchema.Types.ObjectId,ref:'User'})
     userId!: Types.ObjectId;
 
     @Prop({required:true,unique:true})
@@ -46,7 +46,7 @@ export class CarParticipation {
     winDate?: Date;
 
     // Referral tracking
-    @Prop({ type: Types.ObjectId, ref: 'User' })
+    @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'User' })
     referredBy?: Types.ObjectId;
 }
 

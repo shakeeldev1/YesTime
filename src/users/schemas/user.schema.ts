@@ -1,5 +1,5 @@
 import { Prop, Schema, SchemaFactory } from "@nestjs/mongoose";
-import { Document, Types } from "mongoose";
+import { Document, Schema as MongooseSchema, Types } from "mongoose";
 
 export enum UserRole {
   USER = 'user',
@@ -57,7 +57,7 @@ export class User extends Document {
   @Prop({ unique: true, sparse: true })
   referralCode?: string;
 
-  @Prop({ type: Types.ObjectId, ref: 'User' })
+  @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'User' })
   referredBy?: Types.ObjectId;
 
   @Prop({ default: 0 })

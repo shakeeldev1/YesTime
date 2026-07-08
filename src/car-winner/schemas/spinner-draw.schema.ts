@@ -1,5 +1,5 @@
 import { Prop, Schema, SchemaFactory } from "@nestjs/mongoose";
-import { Types } from "mongoose";
+import { Schema as MongooseSchema, Types } from "mongoose";
 
 @Schema({timestamps:true})
 export class SpinnerDraw {
@@ -12,7 +12,7 @@ export class SpinnerDraw {
     @Prop()
     winningCoupen?: string;
 
-    @Prop({type:Types.ObjectId, ref:'User'})
+    @Prop({type:MongooseSchema.Types.ObjectId, ref:'User'})
     winnerId?: Types.ObjectId;
 
     @Prop({default: 'completed'})

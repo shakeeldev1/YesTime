@@ -79,17 +79,16 @@ export class CarParticipationService {
     // independent play chances (PKR 50 = 1 play) they've earned today.
     private async getTodaysContributionAmount(userId: string, now: Date): Promise<number> {
         const { start, end } = this.getUtcDayRange(now);
-        const userIdFilter: Array<string | Types.ObjectId> = [userId];
-        if (Types.ObjectId.isValid(userId)) {
-            userIdFilter.unshift(new Types.ObjectId(userId));
-        }
         const result = await this.carContributionModel.aggregate([
-            { $match: { userId: { $in: userIdFilter }, createdAt: { $gte: start, $lt: end } } },
+            { $match: { userId: new Types.ObjectId(userId), createdAt: { $gte: start, $lt: end } } },
             { $group: { _id: null, total: { $sum: '$amount' } } },
         ]);
         return result[0]?.total || 0;
     }
 
+    // Each call spends exactly one play (one independent draw chance), so a user who
+    // contributed enough for multiple plays today can call this repeatedly until their
+    // plays for the day are used up. Contributing more later raises the available count.
     async playNow(userId: string) {
         const participation = await this.getEligibleParticipationForPlay(userId);
         if (!participation) {
@@ -99,51 +98,46 @@ export class CarParticipationService {
         const now = new Date();
         const playDateKey = this.getUtcDateKey(now);
 
-        const existingToday = await this.carPlayEntryModel.findOne({
+        const todaysContribution = await this.getTodaysContributionAmount(userId, now);
+        const playsAvailableToday = Math.floor(todaysContribution / PKR_PER_PLAY);
+        const playsUsedToday = await this.carPlayEntryModel.countDocuments({
             userId: new Types.ObjectId(userId),
             playDateKey,
         });
 
-        if (existingToday) {
-            const message = existingToday.status === 'pending'
-                ? "Joined Today's Lottery"
-                : 'Already Played Today';
-            throw new BadRequestException(message);
-        }
-
-        const todaysContribution = await this.getTodaysContributionAmount(userId, now);
-        const plays = Math.floor(todaysContribution / PKR_PER_PLAY);
-        if (plays < 1) {
+        if (playsAvailableToday < 1) {
             throw new BadRequestException(`You need to contribute at least PKR ${PKR_PER_PLAY} today before you can play. Make a payment first.`);
         }
 
-        const entries = Array.from({ length: plays }, () => ({
+        if (playsUsedToday >= playsAvailableToday) {
+            throw new BadRequestException(`You have used all ${playsAvailableToday} of your plays for today. Contribute more to earn more plays.`);
+        }
+
+        const entry = new this.carPlayEntryModel({
             userId: new Types.ObjectId(userId),
             coupenNumber: participation.coupenNumber,
             playDateKey,
             status: 'pending',
             enteredAt: now,
-        }));
+        });
+        await entry.save();
 
-        try {
-            await this.carPlayEntryModel.insertMany(entries);
+        const playsRemainingToday = playsAvailableToday - (playsUsedToday + 1);
 
-            return {
-                message: `Joined Today's Lottery with ${plays} play${plays > 1 ? 's' : ''}`,
-                canPlayToday: false,
-                hasPlayedToday: true,
-                enteredIntoNextDraw: true,
-                playsCount: plays,
-                playDateKey,
-                coupenNumber: participation.coupenNumber,
-                nextEligiblePlayAt: this.getNextUtcMidnight(now),
-            };
-        } catch (error: any) {
-            if (error?.code === 11000) {
-                throw new BadRequestException('Already Played Today');
-            }
-            throw error;
-        }
+        return {
+            message: playsRemainingToday > 0
+                ? `Joined the next draw. ${playsRemainingToday} play${playsRemainingToday > 1 ? 's' : ''} left today.`
+                : "Joined the next draw. That was your last play for today.",
+            canPlayToday: playsRemainingToday > 0,
+            hasPlayedToday: true,
+            enteredIntoNextDraw: true,
+            playsUsedToday: playsUsedToday + 1,
+            playsAvailableToday,
+            playsRemainingToday,
+            playDateKey,
+            coupenNumber: participation.coupenNumber,
+            nextEligiblePlayAt: playsRemainingToday > 0 ? null : this.getNextUtcMidnight(now),
+        };
     }
 
     async getMyPlayStatus(userId: string) {
@@ -161,24 +155,26 @@ export class CarParticipationService {
         const enteredIntoNextDraw = todayEntries.some((entry) => entry.status === 'pending');
         const todaysContribution = await this.getTodaysContributionAmount(userId, now);
         const playsAvailableToday = Math.floor(todaysContribution / PKR_PER_PLAY);
+        const playsUsedToday = todayEntries.length;
+        const playsRemainingToday = Math.max(0, playsAvailableToday - playsUsedToday);
+        const canPlayToday = !!participation && playsRemainingToday > 0;
 
         return {
             hasJoinedScheme,
             hasEligibleCoupon: !!participation,
-            canPlayToday: !!participation && !hasPlayedToday && playsAvailableToday >= 1,
+            canPlayToday,
             hasPlayedToday,
             enteredIntoNextDraw,
-            playsToday: todayEntries.length,
+            playsToday: playsUsedToday,
             playsAvailableToday,
-            statusText: enteredIntoNextDraw
-                ? "Joined Today's Lottery"
+            playsRemainingToday,
+            statusText: canPlayToday
+                ? `Ready to Play (${playsRemainingToday} left today)`
                 : hasPlayedToday
-                    ? 'Already Played Today'
-                    : playsAvailableToday >= 1
-                        ? 'Ready to Play'
-                        : `Contribute at least PKR ${PKR_PER_PLAY} today to play`,
+                    ? 'Already used all plays today'
+                    : `Contribute at least PKR ${PKR_PER_PLAY} today to play`,
             coupenNumber: participation?.coupenNumber || null,
-            nextEligiblePlayAt: hasPlayedToday ? this.getNextUtcMidnight(now) : null,
+            nextEligiblePlayAt: canPlayToday ? null : this.getNextUtcMidnight(now),
         };
     }
 
