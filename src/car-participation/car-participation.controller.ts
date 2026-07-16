@@ -8,8 +8,8 @@ export class CarParticipationController {
 
     @Post("join")
     @UseGuards(JwtAuthGuard)
-    join(@Request() req, @Body() body?: { referredByUserId?: string }) {
-        return this.carParticipationService.join(req.user.userId, body?.referredByUserId);
+    join(@Request() req, @Body() body?: { referralCode?: string; referredByUserId?: string }) {
+        return this.carParticipationService.join(req.user.userId, body?.referralCode, body?.referredByUserId);
     }
 
     @Get("my-participation")

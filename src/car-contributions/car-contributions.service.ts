@@ -7,6 +7,7 @@ import { CarParticipation, ParticipationPhase, ParticipationStatus } from 'src/c
 import { CarWinner } from 'src/car-winner/schemas/car-winner.schema';
 import { User } from 'src/users/schemas/user.schema';
 import { MailerService } from 'src/mailer/mailer.service';
+import { UsersService } from 'src/users/users.service';
 
 const PRE_WIN_MIN = 50;
 const PRE_WIN_MAX = 1500;
@@ -23,7 +24,8 @@ export class CarContributionsService {
         @InjectModel(CarParticipation.name) private carParticipationModel: Model<CarParticipation>,
         @InjectModel(CarWinner.name) private carWinnerModel: Model<CarWinner>,
         @InjectModel(User.name) private userModel: Model<User>,
-        private mailerService: MailerService
+        private mailerService: MailerService,
+        private usersService: UsersService,
     ) { }
 
     async create(userId: string, carParticipationId: string, amount: number) {
@@ -181,8 +183,9 @@ export class CarContributionsService {
             progressPercentage = (Number(participation.totalPaid || 0) / targetAmount) * 100;
         }
 
-        // Get referral info
+        // Get referral info (backfill a referral code for accounts created before signup assigned one)
         const user = await this.userModel.findById(userId);
+        const referralCode = user?.referralCode || (user ? await this.usersService.ensureReferralCode(userId) : null);
         const referralCount = await this.carParticipationModel.countDocuments({ referredBy: userId });
         const referredParticipations = await this.carParticipationModel
             .find({ referredBy: new Types.ObjectId(userId) })
@@ -220,7 +223,7 @@ export class CarContributionsService {
                 ? { min: PRE_WIN_MIN, max: PRE_WIN_MAX }
                 : { min: POST_WIN_MONTHLY, max: POST_WIN_MONTHLY },
             remainingAmount: Math.max(0, targetAmount - participation.totalPaid),
-            referralCode: user?.referralCode || null,
+            referralCode: referralCode || null,
             totalReferralEarnings: user?.totalReferralEarnings || 0,
             referralCount,
             referralMembers,

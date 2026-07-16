@@ -3,6 +3,7 @@ import { InjectModel } from '@nestjs/mongoose';
 import { CarParticipation, ParticipationPhase, ParticipationStatus } from './schemas/car-participation.schema';
 import { CarPlayEntry } from './schemas/car-play-entry.schema';
 import { CarContribution } from '../car-contributions/schemas/car-contribution.schema';
+import { UsersService } from '../users/users.service';
 import { Model, Types } from 'mongoose';
 
 // PKR 50 of same-day PRE_WIN contribution buys one independent play/draw chance.
@@ -18,6 +19,8 @@ export class CarParticipationService {
 
     @InjectModel(CarContribution.name)
     private readonly carContributionModel: Model<CarContribution>;
+
+    constructor(private readonly usersService: UsersService) {}
 
     private getUtcDateKey(date: Date): string {
         return date.toISOString().slice(0, 10);
@@ -48,15 +51,30 @@ export class CarParticipationService {
         return coupen;
     }
 
-    async join(userId: string, referredByUserId?: string) {
+    // referralCode is the referrer's shareable code (User.referralCode). referredByUserId
+    // (a raw user id) is accepted too for backwards compatibility.
+    async join(userId: string, referralCode?: string, referredByUserId?: string) {
         const existingParticipation = await this.carParticipationModel.findOne({ userId });
         if (existingParticipation) {
             return { message: "User has already joined", coupen: existingParticipation.coupenNumber };
         }
+
+        let referrerId: string | undefined = referredByUserId;
+        if (referralCode) {
+            const referrer = await this.usersService.findByReferralCode(referralCode.trim().toUpperCase());
+            if (!referrer) {
+                throw new BadRequestException('Invalid referral code.');
+            }
+            if (referrer._id.toString() === userId) {
+                throw new BadRequestException('You cannot refer yourself.');
+            }
+            referrerId = referrer._id.toString();
+        }
+
         const coupenNumber = await this.generateUniqueCoupen();
         const participationData: any = { userId, coupenNumber };
-        if (referredByUserId) {
-            participationData.referredBy = new Types.ObjectId(referredByUserId);
+        if (referrerId) {
+            participationData.referredBy = new Types.ObjectId(referrerId);
         }
         const newParticipation = new this.carParticipationModel(participationData);
         await newParticipation.save();

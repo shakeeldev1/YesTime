@@ -112,6 +112,18 @@ export class UsersService {
         return code!;
     }
 
+    // Backfill for accounts created before referral codes were assigned at signup.
+    async ensureReferralCode(userId: string): Promise<string> {
+        const user = await this.userModel.findById(userId);
+        if (!user) throw new Error('User not found');
+        if (user.referralCode) return user.referralCode;
+
+        const code = await this.generateUniqueReferralCode();
+        user.referralCode = code;
+        await user.save();
+        return code;
+    }
+
     async findAdminEmails(): Promise<string[]> {
         const admins = await this.userModel.find({ role: 'admin' }).select('email').exec();
         return admins.map(a => a.email);

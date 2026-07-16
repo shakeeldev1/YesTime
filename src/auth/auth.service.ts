@@ -24,14 +24,16 @@ export class AuthService {
         
         const hashedPassword = await bcrypt.hash(dto.password, 10);
         const otp = await this.generateOtp();
-        
+        const referralCode = await this.userService.generateUniqueReferralCode();
+
         let user;
         try {
             user = await this.userService.createUser({
                 ...dto,
                 password: hashedPassword,
                 otp: otp,
-            });
+                referralCode,
+            } as any);
         } catch (error: any) {
             if (error?.code === 11000) {
                 const duplicateField = Object.keys(error?.keyPattern || {})[0];
