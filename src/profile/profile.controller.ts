@@ -1,4 +1,4 @@
-import { Controller, Get, Req, UseGuards, Put, Body, UseInterceptors, UploadedFile } from '@nestjs/common';
+import { Controller, Get, Req, UseGuards, Put, Delete, Body, UseInterceptors, UploadedFile, BadRequestException } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { JwtAuthGuard } from 'src/auth/guards/jwt-auth.guard';
 import { UsersService } from 'src/users/users.service';
@@ -39,5 +39,12 @@ export class ProfileController {
         };
         
         return this.userService.updateProfile(req.user.userId, updateData);
+    }
+
+    @Delete('delete-account')
+    async deleteAccount(@Req() req) {
+        const deleted = await this.userService.deleteUser(req.user.userId);
+        if (!deleted) throw new BadRequestException('User not found');
+        return { message: 'Account deleted successfully' };
     }
 }
