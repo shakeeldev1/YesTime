@@ -13,6 +13,14 @@ export class RegisterShopkeeperDto {
   @IsOptional()
   @IsString()
   address?: string;
+
+  @IsOptional()
+  @IsString()
+  shopType?: string;
+
+  @IsOptional()
+  @IsString()
+  shopDescription?: string;
 }
 
 export class RecordPurchaseDto {

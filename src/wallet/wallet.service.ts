@@ -55,6 +55,17 @@ export class WalletService {
         if (!paymentScreenshot) {
             throw new BadRequestException('Payment screenshot is required');
         }
+        if (!dto.transactionReference || !dto.transactionReference.trim()) {
+            throw new BadRequestException('Payment ID / transaction reference is required');
+        }
+
+        const duplicate = await this.depositRequestModel.findOne({
+            transactionReference: dto.transactionReference.trim(),
+            status: { $ne: 'rejected' },
+        });
+        if (duplicate) {
+            throw new BadRequestException('This payment ID has already been submitted. Each payment ID can only be used once.');
+        }
 
         const uploaded = await this.cloudinaryService.uploadImage(paymentScreenshot, 'yes-time/payments');
         const request = new this.depositRequestModel({
@@ -62,14 +73,21 @@ export class WalletService {
             amount: dto.amount,
             paymentMethod: dto.paymentMethod,
             senderName: dto.senderName,
-            transactionReference: dto.transactionReference,
+            transactionReference: dto.transactionReference.trim(),
             bankName: dto.bankName,
             note: dto.note,
             paymentScreenshotUrl: uploaded.secure_url,
             status: 'pending',
         });
 
-        await request.save();
+        try {
+            await request.save();
+        } catch (error: any) {
+            if (error?.code === 11000) {
+                throw new BadRequestException('This payment ID has already been submitted. Each payment ID can only be used once.');
+            }
+            throw error;
+        }
         return request;
     }
 

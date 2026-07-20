@@ -117,6 +117,8 @@ export class CashbackService {
       existing.ownerName = dto.ownerName;
       existing.phone = dto.phone;
       existing.address = dto.address;
+      existing.shopType = dto.shopType;
+      existing.shopDescription = dto.shopDescription;
       existing.status = 'pending';
       existing.isRegistrationPaid = false; // Fee NOT charged - payment method pending
       await existing.save();
@@ -141,6 +143,8 @@ export class CashbackService {
       ownerName: dto.ownerName,
       phone: dto.phone,
       address: dto.address,
+      shopType: dto.shopType,
+      shopDescription: dto.shopDescription,
       status: 'pending',
       isRegistrationPaid: false, // Fee NOT charged - payment method pending
       couponNumber: this.generateCoupon(),
@@ -188,6 +192,8 @@ export class CashbackService {
       ownerName: dto.ownerName,
       phone: dto.phone,
       address: dto.address,
+      shopType: dto.shopType,
+      shopDescription: dto.shopDescription,
       isRegistrationPaid: true,
       status: 'active',
       couponNumber: this.generateCoupon(),
@@ -384,6 +390,36 @@ export class CashbackService {
     );
 
     return rows;
+  }
+
+  /**
+   * PUBLIC: List active shops for the "find shops near me" directory.
+   * Only exposes business-facing fields (no userId/email/coupon/sales figures).
+   * Optional `search` matches shop name, address/area, or shop type/category.
+   */
+  async getPublicShopkeepers(search?: string) {
+    const filter: any = { status: 'active' };
+    if (search && search.trim()) {
+      const escaped = search.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const regex = { $regex: escaped, $options: 'i' };
+      filter.$or = [{ shopName: regex }, { address: regex }, { shopType: regex }];
+    }
+
+    const shopkeepers = await this.shopkeeperModel
+      .find(filter)
+      .select('shopName ownerName phone address shopType shopDescription createdAt')
+      .sort({ shopName: 1 });
+
+    return shopkeepers.map((shopkeeper: any) => ({
+      id: shopkeeper._id,
+      shopName: shopkeeper.shopName,
+      ownerName: shopkeeper.ownerName,
+      phone: shopkeeper.phone,
+      address: shopkeeper.address || null,
+      shopType: shopkeeper.shopType || null,
+      shopDescription: shopkeeper.shopDescription || null,
+      createdAt: shopkeeper.createdAt,
+    }));
   }
 
   async deleteShopkeeper(shopkeeperId: string) {
@@ -865,6 +901,8 @@ export class CashbackService {
 
     const countdown = Math.max(0, Math.floor((nextDrawTime.getTime() - now.getTime()) / 1000));
 
+    const winnerUser = lastDraw?.winnerUserId ? await this.usersService.findById(lastDraw.winnerUserId) : null;
+
     return {
       serverTime: now,
       nextDrawTime,
@@ -877,6 +915,7 @@ export class CashbackService {
             winningNumber: lastDraw.winningNumber,
             hasWinner: !!lastDraw.winnerUserId,
             winnerCoupon: lastDraw.winnerCoupon,
+            winnerName: winnerUser?.name || null,
             prizeAmount: lastDraw.prizeAmount,
             drawDate: lastDraw.drawDate,
           }

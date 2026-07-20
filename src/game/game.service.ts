@@ -574,6 +574,8 @@ export class GameService {
 
     const countdown = Math.max(0, Math.floor((nextDrawTime.getTime() - now.getTime()) / 1000));
 
+    const winnerUser = lastDraw?.winnerUserId ? await this.userModel.findById(lastDraw.winnerUserId) : null;
+
     return {
       serverTime: now,
       nextDrawTime,
@@ -586,6 +588,7 @@ export class GameService {
             winningNumber: lastDraw.winningNumber,
             hasWinner: Boolean(lastDraw.winnerUserId),
             winnerCoupon: lastDraw.winnerCoupon,
+            winnerName: winnerUser?.name || null,
             prizeAmount: lastDraw.prizeAmount,
             drawDate: lastDraw.drawDate,
             winnerTokenId: (lastDraw as any).winnerTokenId || null,

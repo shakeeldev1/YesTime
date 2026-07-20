@@ -17,8 +17,8 @@ export class DepositRequest extends Document {
   @Prop({ required: true })
   senderName!: string;
 
-  @Prop()
-  transactionReference?: string;
+  @Prop({ required: true })
+  transactionReference!: string;
 
   @Prop()
   bankName?: string;
@@ -43,3 +43,10 @@ export class DepositRequest extends Document {
 }
 
 export const DepositRequestSchema = SchemaFactory.createForClass(DepositRequest);
+
+// A payment ID (transactionReference) can only back one non-rejected deposit request at a time,
+// preventing the same screenshot/payment ID from being reused to claim multiple credits.
+DepositRequestSchema.index(
+  { transactionReference: 1 },
+  { unique: true, partialFilterExpression: { status: { $ne: 'rejected' } } },
+);

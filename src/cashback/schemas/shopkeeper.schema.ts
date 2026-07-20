@@ -18,6 +18,12 @@ export class Shopkeeper extends Document {
   @Prop()
   address?: string;
 
+  @Prop()
+  shopType?: string;
+
+  @Prop()
+  shopDescription?: string;
+
   @Prop({ default: false })
   isRegistrationPaid!: boolean;
 

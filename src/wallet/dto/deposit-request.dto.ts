@@ -12,9 +12,9 @@ export class CreateDepositRequestDto {
   @IsNotEmpty()
   senderName: string;
 
-  @IsOptional()
   @IsString()
-  transactionReference?: string;
+  @IsNotEmpty()
+  transactionReference: string;
 
   @IsOptional()
   @IsString()

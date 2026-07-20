@@ -105,6 +105,15 @@ export class CashbackController {
     return this.cashbackService.deleteShopkeeper(id);
   }
 
+  /**
+   * PUBLIC: Directory of all active shops for users to browse/search by area.
+   * No auth required - used to attract/inform users before they sign up.
+   */
+  @Get('shopkeeper/public/directory')
+  async getPublicShopkeepers(@Query('search') search?: string) {
+    return this.cashbackService.getPublicShopkeepers(search);
+  }
+
   @UseGuards(JwtAuthGuard)
   @Get('shopkeeper/:id')
   async getShopkeeperById(@Param('id') id: string) {

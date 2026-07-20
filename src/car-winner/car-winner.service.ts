@@ -160,15 +160,20 @@ export class CarWinnerService {
 
         let lastDraw: any = null;
         if (latestSpinner && latestSpinner.drawDate) {
-            // Return only the last generated random coupon and its timestamp
+            const winnerUser = latestSpinner.winnerId ? await this.userModel.findById(latestSpinner.winnerId) : null;
             lastDraw = {
                 winningCoupen: latestSpinner.winningCoupen || null,
                 drawDate: latestSpinner.drawDate || null,
+                hasWinner: !!latestSpinner.winnerId,
+                winnerName: winnerUser?.name || null,
             };
         } else if (latestWinner) {
+            const winnerUser = await this.userModel.findById(latestWinner.userId);
             lastDraw = {
                 winningCoupen: latestWinner.winningCoupen,
                 drawDate: latestWinner.winningDate,
+                hasWinner: true,
+                winnerName: winnerUser?.name || null,
             };
         }
 

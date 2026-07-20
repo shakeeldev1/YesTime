@@ -233,6 +233,8 @@ export class AuthService {
                     ownerName: user.name,
                     phone: user.phone,
                     address: dto.shopLocation,
+                    shopType: dto.shopType,
+                    shopDescription: dto.shopDescription,
                 } as any);
             }
 

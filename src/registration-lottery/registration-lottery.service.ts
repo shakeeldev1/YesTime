@@ -326,6 +326,8 @@ export class RegistrationLotteryService {
 
     const countdown = Math.max(0, Math.floor((nextDrawTime.getTime() - now.getTime()) / 1000));
 
+    const winnerUser = lastDraw?.winnerUserId ? await this.usersService.findById(lastDraw.winnerUserId) : null;
+
     return {
       serverTime: now,
       nextDrawTime,
@@ -339,6 +341,7 @@ export class RegistrationLotteryService {
             winningNumber: lastDraw.winningNumber,
             hasWinner: !!lastDraw.winnerUserId,
             winnerCoupon: lastDraw.winnerCoupon,
+            winnerName: winnerUser?.name || null,
             prizeAmount: lastDraw.prizeAmount,
             drawDate: lastDraw.drawDate,
           }

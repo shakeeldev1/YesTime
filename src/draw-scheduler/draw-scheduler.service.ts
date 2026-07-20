@@ -44,4 +44,48 @@ export class DrawSchedulerService {
       this.logger.error(`${name} draw failed:`, error);
     }
   }
+
+  /**
+   * PUBLIC: Live draw status across all 4 modules - which one is drawing right now,
+   * its countdown, and the latest result (winner info if anyone won). Used to show
+   * users a live lottery feed so they can watch the draws happen in real time.
+   */
+  async getLiveDrawStatus() {
+    const now = new Date();
+    const minuteIndex = Math.floor(now.getTime() / 60000);
+    const slot = minuteIndex % this.rotation.length;
+    const msIntoCurrentMinute = now.getTime() % 60000;
+    const secondsIntoCurrentSlot = Math.floor(msIntoCurrentMinute / 1000);
+    const secondsRemainingInCurrentSlot = 60 - secondsIntoCurrentSlot;
+
+    const keys = ['registrationLottery', 'carContribution', 'game', 'cashback'];
+
+    const [registrationLottery, carContribution, game, cashback] = await Promise.all([
+      this.registrationLotteryService.getNextDrawInfo(),
+      this.carWinnerService.getNextDrawInfo(),
+      this.gameService.getNextDrawInfo(),
+      this.cashbackService.getNextDrawInfo(),
+    ]);
+
+    const infoByKey: Record<string, any> = { registrationLottery, carContribution, game, cashback };
+
+    const modules = this.rotation.map(({ name }, index) => ({
+      key: keys[index],
+      name,
+      isLive: index === slot,
+      ...infoByKey[keys[index]],
+    }));
+
+    const currentModule = modules[slot];
+
+    return {
+      serverTime: now,
+      currentModuleKey: currentModule.key,
+      currentModuleName: currentModule.name,
+      secondsIntoCurrentSlot,
+      secondsRemainingInCurrentSlot,
+      rotationOrder: keys,
+      modules,
+    };
+  }
 }

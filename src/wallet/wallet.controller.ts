@@ -35,6 +35,9 @@ export class WalletController {
         if (amount > 100000) {
             throw new BadRequestException('Maximum top-up amount is PKR 1,00,000');
         }
+        if (!body.transactionReference || !body.transactionReference.trim()) {
+            throw new BadRequestException('Payment ID / transaction reference is required');
+        }
         const request = await this.walletService.createDepositRequest(req.user.userId, { ...body, amount: String(amount) }, paymentScreenshot);
         return {
             message: 'Payment submitted successfully. Admin will review and add the amount after approval.',
