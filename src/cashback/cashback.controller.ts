@@ -154,6 +154,30 @@ export class CashbackController {
     return this.cashbackService.getAllPurchases(limit || 100);
   }
 
+  /** Admin: bulk-delete purchase records by id (checkbox multi-select). */
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('admin')
+  @Post('purchases/bulk-delete')
+  async bulkDeletePurchases(@Body('ids') ids: string[]) {
+    return this.cashbackService.deletePurchasesByIds(ids);
+  }
+
+  /** Admin: delete every purchase/shopping record for one customer. */
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('admin')
+  @Delete('purchases/customer/:customerId')
+  async deletePurchasesByCustomer(@Param('customerId') customerId: string) {
+    return this.cashbackService.deletePurchasesByCustomer(customerId);
+  }
+
+  /** Admin: delete a single purchase/shopping record. */
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('admin')
+  @Delete('purchases/:id')
+  async deletePurchase(@Param('id') id: string) {
+    return this.cashbackService.deletePurchase(id);
+  }
+
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('admin')
   @Get('cycles/all')

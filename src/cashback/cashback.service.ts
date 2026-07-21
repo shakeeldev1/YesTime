@@ -811,10 +811,36 @@ export class CashbackService {
   async getAllPurchases(limit = 100) {
     return this.purchaseModel
       .find()
-      .populate('customerId', 'name phone')
+      .populate('customerId', 'name email phone')
       .populate('shopkeeperId', 'shopName ownerName')
       .sort({ createdAt: -1 })
       .limit(limit);
+  }
+
+  /**
+   * ADMIN: Deletes a single purchase/shopping record. This is a pure history cleanup -
+   * it does NOT reverse the shopping amount already applied to the customer's cycle level
+   * or refund the commission already debited from the shopkeeper's wallet.
+   */
+  async deletePurchase(purchaseId: string) {
+    const purchase = await this.purchaseModel.findByIdAndDelete(purchaseId);
+    if (!purchase) throw new NotFoundException('Purchase not found');
+    return { message: 'Purchase deleted successfully' };
+  }
+
+  /** ADMIN: Bulk-deletes purchase records by id (checkbox multi-select on the admin table). */
+  async deletePurchasesByIds(ids: string[]) {
+    if (!ids || ids.length === 0) {
+      throw new BadRequestException('No purchase ids provided');
+    }
+    const result = await this.purchaseModel.deleteMany({ _id: { $in: ids } });
+    return { message: `${result.deletedCount} purchase(s) deleted successfully`, deletedCount: result.deletedCount };
+  }
+
+  /** ADMIN: Deletes every purchase/shopping record belonging to one customer. */
+  async deletePurchasesByCustomer(customerId: string) {
+    const result = await this.purchaseModel.deleteMany({ customerId: new Types.ObjectId(customerId) });
+    return { message: `${result.deletedCount} purchase(s) deleted successfully`, deletedCount: result.deletedCount };
   }
 
   // ========== LUCKY DRAW ==========
