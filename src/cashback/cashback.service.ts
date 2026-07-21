@@ -55,9 +55,15 @@ export class CashbackService {
     return this.getUtcDateKey(firstDate) === this.getUtcDateKey(secondDate);
   }
 
-  private async findPlayableCycle(userId: string) {
+  /**
+   * All of a customer's coupons that are currently allowed to enter the daily draw:
+   * the active cycle (once it has committed at least level 1), plus every past cycle
+   * that became permanent (level 30) or already won - those keep playing forever.
+   * Sorted oldest-first so permanent coupons get an entry before the newest active one.
+   */
+  private async getEligibleCyclesForUser(userId: string) {
     return this.cycleModel
-      .findOne({
+      .find({
         customerId: new Types.ObjectId(userId),
         $or: [
           { status: 'active', currentLevel: { $gte: 1 } },
@@ -65,7 +71,7 @@ export class CashbackService {
           { status: 'won' },
         ],
       })
-      .sort({ createdAt: -1 });
+      .sort({ createdAt: 1 });
   }
 
   /**
@@ -573,35 +579,77 @@ export class CashbackService {
     return this.createNewCycle(userId);
   }
 
+  /**
+   * PUBLIC (auth): Status of every eligible coupon for today - which ones already played
+   * and how many plays are still available. Drives the "Play (N left)" button + coupon list.
+   */
+  async getPlayStatus(userId: string) {
+    const eligibleCycles = await this.getEligibleCyclesForUser(userId);
+    const now = new Date();
+    const playDateKey = this.getUtcDateKey(now);
+
+    const playedToday = await this.participationModel.find({
+      customerId: new Types.ObjectId(userId),
+      playDateKey,
+    });
+    const playedCouponNumbers = new Set(playedToday.map((entry) => entry.couponNumber));
+
+    const coupons = eligibleCycles.map((cycle) => ({
+      couponNumber: cycle.couponNumber,
+      status: cycle.status,
+      isPermanent: cycle.isPermanent,
+      currentLevel: cycle.currentLevel,
+      totalShopping: cycle.totalShopping,
+      playedToday: playedCouponNumbers.has(cycle.couponNumber),
+    }));
+
+    const playsAvailableToday = coupons.length;
+    const playsUsedToday = coupons.filter((c) => c.playedToday).length;
+    const playsRemainingToday = playsAvailableToday - playsUsedToday;
+
+    return {
+      hasEligibleCoupon: playsAvailableToday > 0,
+      canPlayToday: playsRemainingToday > 0,
+      playsAvailableToday,
+      playsUsedToday,
+      playsRemainingToday,
+      coupons,
+      nextEligiblePlayAt: playsRemainingToday > 0 ? null : this.getNextUtcMidnight(now),
+    };
+  }
+
+  /**
+   * Spends exactly ONE play per call - enters the next not-yet-played-today eligible coupon
+   * (oldest/permanent coupons first) into the draw. Call repeatedly to play all of today's
+   * eligible coupons, mirroring the car-participation "play-now" pattern.
+   */
   async playForToday(userId: string) {
     const user = await this.usersService.findById(userId);
     if (!user) throw new NotFoundException('User not found');
 
-    const playableCycle = await this.findPlayableCycle(userId);
-    if (!playableCycle) {
+    const eligibleCycles = await this.getEligibleCyclesForUser(userId);
+    if (eligibleCycles.length === 0) {
       throw new BadRequestException('You do not have an eligible cashback coupon to play today.');
     }
 
     const now = new Date();
     const playDateKey = this.getUtcDateKey(now);
-    const existingParticipation = await this.participationModel.findOne({
+    const playedToday = await this.participationModel.find({
       customerId: new Types.ObjectId(userId),
       playDateKey,
     });
+    const playedCouponNumbers = new Set(playedToday.map((entry) => entry.couponNumber));
 
-    if (existingParticipation) {
-      const message =
-        existingParticipation.status === 'pending'
-          ? 'You are entered into the next lottery already.'
-          : 'Already Played Today. Please come back tomorrow.';
-      throw new BadRequestException(message);
+    const nextCycle = eligibleCycles.find((cycle) => !playedCouponNumbers.has(cycle.couponNumber));
+    if (!nextCycle) {
+      throw new BadRequestException('You have already played all your eligible coupons today. Please come back tomorrow.');
     }
 
     try {
       const participation = new this.participationModel({
         customerId: new Types.ObjectId(userId),
         playDateKey,
-        couponNumber: playableCycle.couponNumber,
+        couponNumber: nextCycle.couponNumber,
         status: 'pending',
         enteredAt: now,
       });
@@ -610,21 +658,28 @@ export class CashbackService {
       await this.createNotification(
         userId,
         'Play confirmed',
-        `Your coupon ${playableCycle.couponNumber} is entered into the next cashback draw.`,
+        `Your coupon ${nextCycle.couponNumber} is entered into the next cashback draw.`,
         'DRAW',
       );
 
+      const playsAvailableToday = eligibleCycles.length;
+      const playsUsedToday = playedCouponNumbers.size + 1;
+      const playsRemainingToday = playsAvailableToday - playsUsedToday;
+
       return {
-        message: 'You are entered into the next lottery.',
-        canPlayToday: false,
+        message: `Coupon ${nextCycle.couponNumber} entered into the next cashback draw.`,
+        canPlayToday: playsRemainingToday > 0,
         enteredIntoNextDraw: true,
         playDateKey,
-        couponNumber: playableCycle.couponNumber,
-        nextEligiblePlayAt: this.getNextUtcMidnight(now),
+        couponNumber: nextCycle.couponNumber,
+        playsAvailableToday,
+        playsUsedToday,
+        playsRemainingToday,
+        nextEligiblePlayAt: playsRemainingToday > 0 ? null : this.getNextUtcMidnight(now),
       };
     } catch (error: any) {
       if (error?.code === 11000) {
-        throw new BadRequestException('Already Played Today. Please come back tomorrow.');
+        throw new BadRequestException('This coupon has already played today.');
       }
       throw error;
     }
@@ -933,17 +988,12 @@ export class CashbackService {
 
   async getDashboardStats(userId: string) {
     const activeCycle = await this.cycleModel.findOne({ customerId: new Types.ObjectId(userId), status: 'active' });
-    const playableCycle = await this.findPlayableCycle(userId);
     const allCycles = await this.cycleModel.find({ customerId: new Types.ObjectId(userId) });
     const purchases = await this.purchaseModel.countDocuments({ customerId: new Types.ObjectId(userId) });
     const wins = await this.drawModel.find({ winnerUserId: userId });
     const totalWinnings = wins.reduce((sum, d) => sum + d.prizeAmount, 0);
     const walletBalance = await this.walletService.getBalance(userId);
-    const latestParticipation = await this.participationModel.findOne({ customerId: new Types.ObjectId(userId) }).sort({ createdAt: -1 });
-    const now = new Date();
-    const participatedToday = !!latestParticipation && this.isSameUtcDay(latestParticipation.createdAt, now);
-    const hasEligibleCoupon = !!playableCycle;
-    const canPlayToday = hasEligibleCoupon && !participatedToday;
+    const playStatus = await this.getPlayStatus(userId);
     const totalParticipants = await this.participationModel.countDocuments({ status: 'pending' });
 
     return {
@@ -957,14 +1007,11 @@ export class CashbackService {
       totalWins: wins.length,
       totalParticipants,
       playStatus: {
-        hasEligibleCoupon,
-        canPlayToday,
-        hasPlayedToday: participatedToday,
-        participationStatus: latestParticipation?.status || 'none',
-        couponNumber: playableCycle?.couponNumber || null,
-        enteredAt: latestParticipation?.enteredAt || null,
-        enteredIntoNextDraw: latestParticipation?.status === 'pending' && participatedToday,
-        nextEligiblePlayAt: canPlayToday ? null : this.getNextUtcMidnight(now),
+        ...playStatus,
+        // Backward-compatible single-coupon fields for older frontend callers.
+        hasPlayedToday: playStatus.playsAvailableToday > 0 && playStatus.playsRemainingToday === 0,
+        couponNumber: activeCycle?.couponNumber || playStatus.coupons[playStatus.coupons.length - 1]?.couponNumber || null,
+        enteredIntoNextDraw: playStatus.playsUsedToday > 0,
       },
       activeCycle: activeCycle
         ? {

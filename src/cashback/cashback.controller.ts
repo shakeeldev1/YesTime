@@ -175,6 +175,13 @@ export class CashbackController {
     return this.cashbackService.playForToday(req.user.userId);
   }
 
+  /** All of the caller's eligible coupons (permanent + active) with today's played/not-played status. */
+  @UseGuards(JwtAuthGuard)
+  @Get('play-status')
+  async getPlayStatus(@Request() req) {
+    return this.cashbackService.getPlayStatus(req.user.userId);
+  }
+
   @UseGuards(JwtAuthGuard)
   @Get('active-cycle')
   async getActiveCycle(@Request() req) {

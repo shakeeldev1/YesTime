@@ -30,5 +30,7 @@ export class CashbackParticipation extends Document {
 }
 
 export const CashbackParticipationSchema = SchemaFactory.createForClass(CashbackParticipation);
-CashbackParticipationSchema.index({ customerId: 1, playDateKey: 1 }, { unique: true });
+// One entry per coupon per day - NOT per customer per day, since a customer can hold several
+// eligible coupons at once (old permanent ones plus a new active cycle) and each plays independently.
+CashbackParticipationSchema.index({ customerId: 1, playDateKey: 1, couponNumber: 1 }, { unique: true });
 CashbackParticipationSchema.index({ status: 1, playDateKey: 1 });
