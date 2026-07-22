@@ -18,6 +18,8 @@ export class CashbackService {
   private readonly COMMISSION_RATE = 0.025; // 2.5%
   private readonly LEVEL_BASE = 1000; // Each level costs level × 1000
   private readonly MAX_LEVELS = 30;
+  // Total shopping a single cycle/coupon can ever hold: sum(1..30) * 1000 = 465,000.
+  private readonly MAX_CYCLE_TOTAL = ((this.MAX_LEVELS * (this.MAX_LEVELS + 1)) / 2) * this.LEVEL_BASE;
 
   constructor(
     @InjectModel(Shopkeeper.name) private readonly shopkeeperModel: Model<Shopkeeper>,
@@ -524,43 +526,39 @@ export class CashbackService {
     shopkeeper.totalCommissionPaid += commissionAmount;
     await shopkeeper.save();
 
-    // Add the full shopping amount to customer's cashback cycle
-    cycle.totalShopping += dto.amount;
-    const { level, committed, remaining } = this.calculateLevel(cycle.totalShopping);
-    cycle.currentLevel = level;
-    cycle.totalCommitted = committed;
-    cycle.remaining = remaining;
-
-    // Check if completed all 30 levels
-    if (level >= this.MAX_LEVELS && !cycle.isPermanent) {
-      cycle.isPermanent = true;
-      cycle.status = 'completed';
-
-      await this.createNotification(
-        cycle.customerId.toString(),
-        '🎊 30-Level Cycle Complete!',
-        `Your coupon ${cycle.couponNumber} is now permanently in the draw! Keep shopping - you could win anytime!`,
-        'SYSTEM',
-      );
-    }
-
-    await cycle.save();
+    // Add the shopping amount to the customer's cycle, capping it at 465,000 (level 30) and
+    // rolling any overflow into their next coupon automatically.
+    const applied = await this.applyShoppingAmount(cycle.customerId.toString(), cycle, dto.amount);
+    const finalEntry = applied[applied.length - 1];
+    const finalCycle = finalEntry.cycle;
+    const splitAcrossCoupons = applied.length > 1;
 
     // Notify customer about the purchase
     await this.createNotification(
       cycle.customerId.toString(),
       'Shopping Added!',
-      `PKR ${dto.amount} shopping recorded from ${shopkeeper.shopName}. Your level: ${cycle.currentLevel}/${this.MAX_LEVELS}`,
+      splitAcrossCoupons
+        ? `PKR ${dto.amount} shopping recorded from ${shopkeeper.shopName}, split across ${applied.length} coupons since coupon ${cycle.couponNumber} reached its maximum level.`
+        : `PKR ${dto.amount} shopping recorded from ${shopkeeper.shopName}. Your level: ${finalCycle.currentLevel}/${this.MAX_LEVELS}`,
       'SHOPPING',
     );
 
     return {
       message: 'Purchase recorded successfully',
       purchase,
-      customerLevel: cycle.currentLevel,
-      customerTotalShopping: cycle.totalShopping,
-      customerRemaining: cycle.remaining,
+      customerLevel: finalCycle.currentLevel,
+      customerTotalShopping: finalCycle.totalShopping,
+      customerRemaining: finalCycle.remaining,
       commissionPaid: commissionAmount,
+      ...(splitAcrossCoupons
+        ? {
+            splitAcrossCoupons: applied.map((entry) => ({
+              couponNumber: entry.cycle.couponNumber,
+              appliedAmount: entry.appliedAmount,
+              isPermanent: entry.cycle.isPermanent,
+            })),
+          }
+        : {}),
     };
   }
 
@@ -685,11 +683,10 @@ export class CashbackService {
     }
   }
 
-  private async createNewCycle(userId: string) {
-    const coupon = this.generateCoupon();
+  private async createCycleDocument(userId: string) {
     const cycle = new this.cycleModel({
       customerId: new Types.ObjectId(userId),
-      couponNumber: coupon,
+      couponNumber: this.generateCoupon(),
       totalShopping: 0,
       currentLevel: 0,
       totalCommitted: 0,
@@ -698,15 +695,75 @@ export class CashbackService {
       cycleStartDate: new Date(),
     });
     await cycle.save();
+    return cycle;
+  }
+
+  private async createNewCycle(userId: string) {
+    const cycle = await this.createCycleDocument(userId);
 
     await this.createNotification(
       userId,
       'Cashback Cycle Started!',
-      `Your cashback coupon is: ${coupon}. Show this to shopkeepers when making purchases.`,
+      `Your cashback coupon is: ${cycle.couponNumber}. Show this to shopkeepers when making purchases.`,
       'SYSTEM',
     );
 
-    return { message: 'Cashback cycle started', coupon, cycleId: cycle._id };
+    return { message: 'Cashback cycle started', coupon: cycle.couponNumber, cycleId: cycle._id };
+  }
+
+  /**
+   * Applies a shopping amount to a customer's cycle, capping each cycle at MAX_CYCLE_TOTAL
+   * (465,000 / level 30). Any amount beyond that cap automatically rolls into the customer's
+   * next coupon (reusing their current active cycle, or auto-creating a new one), cascading
+   * further in the rare case a single purchase overflows more than one cycle.
+   */
+  private async applyShoppingAmount(userId: string, startingCycle: CashbackCycle, amount: number) {
+    const applied: Array<{ cycle: CashbackCycle; appliedAmount: number }> = [];
+    let cycle = startingCycle;
+    let remainingAmount = amount;
+
+    while (remainingAmount > 0) {
+      const capacity = Math.max(0, this.MAX_CYCLE_TOTAL - cycle.totalShopping);
+      const amountForThisCycle = Math.min(capacity, remainingAmount);
+
+      cycle.totalShopping += amountForThisCycle;
+      const { level, committed, remaining } = this.calculateLevel(cycle.totalShopping);
+      cycle.currentLevel = level;
+      cycle.totalCommitted = committed;
+      cycle.remaining = remaining;
+
+      if (level >= this.MAX_LEVELS && !cycle.isPermanent) {
+        cycle.isPermanent = true;
+        cycle.status = 'completed';
+
+        await this.createNotification(
+          userId,
+          '🎊 30-Level Cycle Complete!',
+          `Your coupon ${cycle.couponNumber} is now permanently in the draw! Keep shopping - you could win anytime!`,
+          'SYSTEM',
+        );
+      }
+
+      await cycle.save();
+      applied.push({ cycle, appliedAmount: amountForThisCycle });
+      remainingAmount -= amountForThisCycle;
+
+      if (remainingAmount > 0) {
+        let nextCycle = await this.cycleModel.findOne({ customerId: new Types.ObjectId(userId), status: 'active' });
+        if (!nextCycle) {
+          nextCycle = await this.createCycleDocument(userId);
+          await this.createNotification(
+            userId,
+            'New Cashback Coupon Assigned',
+            `Your previous coupon reached the maximum level. Your remaining PKR ${remainingAmount} shopping was moved to new coupon ${nextCycle.couponNumber}.`,
+            'SYSTEM',
+          );
+        }
+        cycle = nextCycle;
+      }
+    }
+
+    return applied;
   }
 
   async getMyActiveCycle(userId: string) {
