@@ -40,11 +40,6 @@ export class GameService {
     return normalized;
   }
 
-  private isSameDay(a?: Date | null, b: Date = new Date()): boolean {
-    if (!a) return false;
-    return this.normalizeDate(new Date(a)).getTime() === this.normalizeDate(b).getTime();
-  }
-
   private getTokenInvestedValue(token: GameCycle): number {
     const legacyAmount = Number((token as any).totalSavings || 0);
     const invested = Number((token as any).totalInvested || 0);
@@ -67,47 +62,36 @@ export class GameService {
     return Boolean((token as any).isPermanent) || this.getTokenRewardValue(token) >= this.MAX_REWARD;
   }
 
-  // A token can only be invested in (paid for) once per calendar day.
-  private hasInvestedToday(token: GameCycle, referenceDate = new Date()): boolean {
-    return this.isSameDay((token as any).lastPaymentDate, referenceDate);
-  }
-
-  // A token can only be played (entered into a draw) once per calendar day, and only
-  // after today's investment has been made.
-  private hasPlayedToday(token: GameCycle, referenceDate = new Date()): boolean {
-    return this.isSameDay((token as any).lastParticipatedAt, referenceDate);
+  // A token is eligible to play as soon as it has an investment that hasn't been used in
+  // a draw yet - investing PKR 50 again immediately re-arms it for another play, with no
+  // calendar-day wait. Reward still climbs by PKR 1,000 per PKR 50 invested (capped at 30).
+  private hasUnplayedInvestment(token: GameCycle): boolean {
+    const lastPaymentTime = (token as any).lastPaymentDate ? new Date((token as any).lastPaymentDate).getTime() : 0;
+    if (!lastPaymentTime) return false;
+    const lastParticipatedTime = (token as any).lastParticipatedAt ? new Date((token as any).lastParticipatedAt).getTime() : 0;
+    return lastPaymentTime > lastParticipatedTime;
   }
 
   private isQueued(token: GameCycle): boolean {
     return Boolean((token as any).queuedForNextRound);
   }
 
-  private canParticipateToday(token: GameCycle, referenceDate = new Date()): boolean {
+  private canParticipateToday(token: GameCycle, _referenceDate = new Date()): boolean {
     if (this.isPermanentToken(token)) return false;
     if (this.isQueued(token)) return false;
-    if (!this.hasInvestedToday(token, referenceDate)) return false;
-    if (this.hasPlayedToday(token, referenceDate)) return false;
-    return true;
+    return this.hasUnplayedInvestment(token);
   }
 
   private getNextEligiblePlayDateForToken(token: GameCycle, referenceDate = new Date()): Date {
-    if (this.isPermanentToken(token)) {
-      return this.normalizeDate(referenceDate);
-    }
-    if (!this.hasInvestedToday(token, referenceDate) || !this.hasPlayedToday(token, referenceDate)) {
-      // Either today's investment hasn't been made yet, or it has but hasn't been played yet.
-      // Either way, the next actionable date is today.
-      return this.normalizeDate(referenceDate);
-    }
-    const tomorrow = new Date(referenceDate);
-    tomorrow.setDate(tomorrow.getDate() + 1);
-    return this.normalizeDate(tomorrow);
+    // No more calendar-day wait: the next actionable moment (invest, or play if already
+    // invested) is always right now.
+    return this.normalizeDate(referenceDate);
   }
 
   private getTokenStatus(token: GameCycle, referenceDate = new Date()): string {
     if (this.isQueued(token)) return 'queued';
     if (this.isPermanentToken(token)) return 'permanent';
-    if (this.hasPlayedToday(token, referenceDate)) return 'played';
+    if (!this.hasUnplayedInvestment(token)) return 'played';
     return 'active';
   }
 
@@ -118,8 +102,8 @@ export class GameService {
     const currentDay = this.getCurrentDayValue(token);
     const eligibleToday = this.canParticipateToday(token, referenceDate);
     const queued = this.isQueued(token);
-    const investedToday = this.hasInvestedToday(token, referenceDate);
-    const playedToday = this.hasPlayedToday(token, referenceDate);
+    const permanent = this.isPermanentToken(token);
+    const unplayedInvestment = this.hasUnplayedInvestment(token);
 
     return {
       id: token._id,
@@ -134,13 +118,13 @@ export class GameService {
       prizeIfWinToday: reward,
       totalWins: Number((token as any).totalWins || 0),
       totalLosses: Number((token as any).totalLosses || 0),
-      isPermanent: this.isPermanentToken(token),
-      permanentPrizeAmount: Number((token as any).permanentPrizeAmount || (this.isPermanentToken(token) ? this.MAX_REWARD : 0)),
+      isPermanent: permanent,
+      permanentPrizeAmount: Number((token as any).permanentPrizeAmount || (permanent ? this.MAX_REWARD : 0)),
       autoJoinEnabledForCurrentCycle: Boolean((token as any).autoJoinEnabledForCurrentCycle),
-      hasPlayedCurrentCycle: playedToday,
-      playsPurchased: investedToday ? 1 : 0,
-      playsUsed: playedToday ? 1 : 0,
-      playsRemaining: investedToday && !playedToday ? 1 : 0,
+      hasPlayedCurrentCycle: !unplayedInvestment && !permanent,
+      playsPurchased: unplayedInvestment ? 1 : 0,
+      playsUsed: unplayedInvestment ? 0 : 1,
+      playsRemaining: eligibleToday ? 1 : 0,
       queuedForNextRound: queued,
       participationMode: (token as any).participationMode || 'none',
       currentDay,
@@ -152,8 +136,9 @@ export class GameService {
       nextEligiblePlayDate,
       canPlayNow: eligibleToday,
       canAutoJoin: eligibleToday,
-      canInvestToday: !investedToday && !this.isPermanentToken(token),
-      playStatus: queued ? 'queued' : eligibleToday ? 'eligible' : this.isPermanentToken(token) ? 'permanent' : 'locked',
+      // No more once-per-day investment limit - only a maxed-out (permanent) token blocks investing.
+      canInvestToday: !permanent,
+      playStatus: queued ? 'queued' : eligibleToday ? 'eligible' : permanent ? 'permanent' : 'locked',
     };
   }
 
@@ -185,8 +170,9 @@ export class GameService {
     return tokens[0] || null;
   }
 
-  // Pay today's PKR 50 investment. Upgrades the user's currently open (non-permanent)
-  // token, or creates a brand new one if none exists yet / the previous one is permanent.
+  // Pay a PKR 50 investment - can be called any number of times, not just once a day.
+  // Upgrades the user's currently open (non-permanent) token, or creates a brand new one
+  // if none exists yet / the previous one is permanent.
   async joinGame(userId: string) {
     const now = new Date();
     const session = await this.cycleModel.db.startSession();
@@ -195,14 +181,13 @@ export class GameService {
       let tokenResult: GameCycle | null = null;
 
       await session.withTransaction(async () => {
+        // No limit on how many times a user can invest PKR 50 - each investment immediately
+        // bumps the reward ladder (PKR 1,000 per PKR 50, capped at PKR 30,000) and re-arms
+        // the token for another play, with no calendar-day wait between investments.
         const existingOpenToken = await this.cycleModel
           .findOne({ userId, isPermanent: false })
           .sort({ createdAt: -1 })
           .session(session);
-
-        if (existingOpenToken && this.hasInvestedToday(existingOpenToken, now)) {
-          throw new BadRequestException('You have already invested today. Come back tomorrow.');
-        }
 
         await this.walletService.debit(userId, this.INVESTMENT_AMOUNT, 'Token investment', session);
 
@@ -293,7 +278,7 @@ export class GameService {
     }
 
     if (!this.canParticipateToday(token, now)) {
-      throw new BadRequestException('You need to invest today before you can play. Call join to invest ₹50, then play.');
+      throw new BadRequestException('You need an unplayed investment first. Call join to invest PKR 50, then play.');
     }
 
     if (this.isQueued(token) && (token as any).participationMode === 'auto') {
@@ -328,7 +313,7 @@ export class GameService {
     }
 
     if (!this.canParticipateToday(token, now)) {
-      throw new BadRequestException('You need to invest today before you can auto-join. Call join to invest ₹50, then auto-join.');
+      throw new BadRequestException('You need an unplayed investment first. Call join to invest PKR 50, then auto-join.');
     }
 
     if ((token as any).queuedForNextRound && (token as any).participationMode === 'play') {
