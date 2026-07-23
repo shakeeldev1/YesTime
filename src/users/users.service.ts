@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { User } from './schemas/user.schema';
 import { Model } from 'mongoose';
@@ -115,7 +115,7 @@ export class UsersService {
     // Backfill for accounts created before referral codes were assigned at signup.
     async ensureReferralCode(userId: string): Promise<string> {
         const user = await this.userModel.findById(userId);
-        if (!user) throw new Error('User not found');
+        if (!user) throw new NotFoundException('User not found');
         if (user.referralCode) return user.referralCode;
 
         const code = await this.generateUniqueReferralCode();

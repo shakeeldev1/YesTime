@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { CarContribution, } from './schemas/car-contribution.schema';
 import { Model, Types } from 'mongoose';
@@ -26,25 +26,25 @@ export class CarContributionsService {
 
     async create(userId: string, carParticipationId: string, amount: number) {
         const carParticipation = await this.carParticipationModel.findById(carParticipationId);
-        if (!carParticipation) throw new Error('Car participation not found');
-        if (carParticipation.userId.toString() !== userId) throw new Error('Unauthorized');
+        if (!carParticipation) throw new NotFoundException('Car participation not found');
+        if (carParticipation.userId.toString() !== userId) throw new BadRequestException('You can only contribute to your own car participation.');
 
         const plan = getCarPlan(carParticipation.planId);
 
         // Validate amount based on phase
         if (carParticipation.phase === ParticipationPhase.PRE_WIN) {
             if (amount < plan.dailyMin || amount > plan.dailyMax) {
-                throw new Error(`Payment amount must be between PKR ${plan.dailyMin} and PKR ${plan.dailyMax} for daily contribution`);
+                throw new BadRequestException(`Payment amount must be between PKR ${plan.dailyMin} and PKR ${plan.dailyMax} for daily contribution`);
             }
         } else if (carParticipation.phase === ParticipationPhase.POST_WIN) {
             if (amount !== plan.postWinMonthly) {
-                throw new Error(`Payment amount must be PKR ${plan.postWinMonthly} for post-win monthly payment`);
+                throw new BadRequestException(`Payment amount must be PKR ${plan.postWinMonthly} for post-win monthly payment`);
             }
         }
 
         const wallet = await this.walletModel.findOne({ userId });
-        if (!wallet) throw new Error('Wallet not found');
-        if (wallet.balance < amount) throw new Error('Insufficient balance');
+        if (!wallet) throw new NotFoundException('Wallet not found');
+        if (wallet.balance < amount) throw new BadRequestException('Insufficient balance');
 
         wallet.balance -= amount;
         await wallet.save();
