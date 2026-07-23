@@ -5,9 +5,7 @@ import { CarPlayEntry } from './schemas/car-play-entry.schema';
 import { CarContribution } from '../car-contributions/schemas/car-contribution.schema';
 import { UsersService } from '../users/users.service';
 import { Model, Types } from 'mongoose';
-
-// PKR 50 of same-day PRE_WIN contribution buys one independent play/draw chance.
-const PKR_PER_PLAY = 50;
+import { CAR_PLANS, DEFAULT_CAR_PLAN_ID, getCarPlan, isValidCarPlanId } from './car-plans';
 
 @Injectable()
 export class CarParticipationService {
@@ -51,12 +49,31 @@ export class CarParticipationService {
         return coupen;
     }
 
+    // All 4 available car plans - exposed publicly so the join flow can show the user
+    // full pricing information (daily/monthly amounts, target, post-win installment)
+    // for each car before they choose one.
+    getPlans() {
+        return CAR_PLANS;
+    }
+
     // referralCode is the referrer's shareable code (User.referralCode). referredByUserId
-    // (a raw user id) is accepted too for backwards compatibility.
-    async join(userId: string, referralCode?: string, referredByUserId?: string) {
+    // (a raw user id) is accepted too for backwards compatibility. planId picks which of
+    // the 4 car plans (car-plans.ts) to join - defaults to Plan 1 if omitted, so existing
+    // callers that don't send a plan keep behaving exactly as before.
+    async join(userId: string, planId?: number, referralCode?: string, referredByUserId?: string) {
         const existingParticipation = await this.carParticipationModel.findOne({ userId });
         if (existingParticipation) {
-            return { message: "User has already joined", coupen: existingParticipation.coupenNumber };
+            return {
+                message: "User has already joined",
+                coupen: existingParticipation.coupenNumber,
+                planId: existingParticipation.planId,
+                plan: getCarPlan(existingParticipation.planId),
+            };
+        }
+
+        const resolvedPlanId = planId ?? DEFAULT_CAR_PLAN_ID;
+        if (!isValidCarPlanId(resolvedPlanId)) {
+            throw new BadRequestException(`Invalid plan selected. Choose a plan id between 1 and ${CAR_PLANS.length}.`);
         }
 
         let referrerId: string | undefined = referredByUserId;
@@ -72,13 +89,20 @@ export class CarParticipationService {
         }
 
         const coupenNumber = await this.generateUniqueCoupen();
-        const participationData: any = { userId, coupenNumber };
+        const participationData: any = { userId, coupenNumber, planId: resolvedPlanId };
         if (referrerId) {
             participationData.referredBy = new Types.ObjectId(referrerId);
         }
         const newParticipation = new this.carParticipationModel(participationData);
         await newParticipation.save();
-        return { message: "User joined successfully", coupen: coupenNumber };
+
+        const plan = getCarPlan(resolvedPlanId);
+        return {
+            message: `User joined successfully on ${plan.name} (target PKR ${plan.targetAmount.toLocaleString()})`,
+            coupen: coupenNumber,
+            planId: resolvedPlanId,
+            plan,
+        };
     }
 
     async getParticipation(userId: string) {
@@ -113,18 +137,19 @@ export class CarParticipationService {
             throw new BadRequestException('You do not have an eligible coupon to play now.');
         }
 
+        const pkrPerPlay = getCarPlan(participation.planId).pkrPerPlay;
         const now = new Date();
         const playDateKey = this.getUtcDateKey(now);
 
         const todaysContribution = await this.getTodaysContributionAmount(userId, now);
-        const playsAvailableToday = Math.floor(todaysContribution / PKR_PER_PLAY);
+        const playsAvailableToday = Math.floor(todaysContribution / pkrPerPlay);
         const playsUsedToday = await this.carPlayEntryModel.countDocuments({
             userId: new Types.ObjectId(userId),
             playDateKey,
         });
 
         if (playsAvailableToday < 1) {
-            throw new BadRequestException(`You need to contribute at least PKR ${PKR_PER_PLAY} today before you can play. Make a payment first.`);
+            throw new BadRequestException(`You need to contribute at least PKR ${pkrPerPlay} today before you can play. Make a payment first.`);
         }
 
         if (playsUsedToday >= playsAvailableToday) {
@@ -160,7 +185,9 @@ export class CarParticipationService {
 
     async getMyPlayStatus(userId: string) {
         const participation = await this.getEligibleParticipationForPlay(userId);
-        const hasJoinedScheme = !!(await this.carParticipationModel.findOne({ userId }));
+        const anyParticipation = await this.carParticipationModel.findOne({ userId });
+        const hasJoinedScheme = !!anyParticipation;
+        const pkrPerPlay = getCarPlan(anyParticipation?.planId).pkrPerPlay;
         const now = new Date();
         const playDateKey = this.getUtcDateKey(now);
 
@@ -172,7 +199,7 @@ export class CarParticipationService {
         const hasPlayedToday = todayEntries.length > 0;
         const enteredIntoNextDraw = todayEntries.some((entry) => entry.status === 'pending');
         const todaysContribution = await this.getTodaysContributionAmount(userId, now);
-        const playsAvailableToday = Math.floor(todaysContribution / PKR_PER_PLAY);
+        const playsAvailableToday = Math.floor(todaysContribution / pkrPerPlay);
         const playsUsedToday = todayEntries.length;
         const playsRemainingToday = Math.max(0, playsAvailableToday - playsUsedToday);
         const canPlayToday = !!participation && playsRemainingToday > 0;
@@ -190,8 +217,9 @@ export class CarParticipationService {
                 ? `Ready to Play (${playsRemainingToday} left today)`
                 : hasPlayedToday
                     ? 'Already used all plays today'
-                    : `Contribute at least PKR ${PKR_PER_PLAY} today to play`,
+                    : `Contribute at least PKR ${pkrPerPlay} today to play`,
             coupenNumber: participation?.coupenNumber || null,
+            planId: anyParticipation?.planId ?? null,
             nextEligiblePlayAt: canPlayToday ? null : this.getNextUtcMidnight(now),
         };
     }

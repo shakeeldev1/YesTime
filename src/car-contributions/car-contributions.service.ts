@@ -4,17 +4,13 @@ import { CarContribution, } from './schemas/car-contribution.schema';
 import { Model, Types } from 'mongoose';
 import { Wallet } from 'src/wallet/schemas/wallet.schema';
 import { CarParticipation, ParticipationPhase, ParticipationStatus } from 'src/car-participation/schemas/car-participation.schema';
+import { getCarPlan } from 'src/car-participation/car-plans';
 import { CarWinner } from 'src/car-winner/schemas/car-winner.schema';
 import { User } from 'src/users/schemas/user.schema';
 import { MailerService } from 'src/mailer/mailer.service';
 import { UsersService } from 'src/users/users.service';
 
-const PRE_WIN_MIN = 50;
-const PRE_WIN_MAX = 1500;
-const POST_WIN_MONTHLY = 36000;
-const THRESHOLD_AMOUNT = 547500;
-const CAR_PRICE = 3000000;
-const REFERRAL_PERCENTAGE = 0.20; // 20% referral bonus (300/1500 = 20%)
+const REFERRAL_PERCENTAGE = 0.20; // 20% referral bonus, flat across every plan
 
 @Injectable()
 export class CarContributionsService {
@@ -33,14 +29,16 @@ export class CarContributionsService {
         if (!carParticipation) throw new Error('Car participation not found');
         if (carParticipation.userId.toString() !== userId) throw new Error('Unauthorized');
 
+        const plan = getCarPlan(carParticipation.planId);
+
         // Validate amount based on phase
         if (carParticipation.phase === ParticipationPhase.PRE_WIN) {
-            if (amount < PRE_WIN_MIN || amount > PRE_WIN_MAX) {
-                throw new Error(`Payment amount must be between PKR ${PRE_WIN_MIN} and PKR ${PRE_WIN_MAX} for daily contribution`);
+            if (amount < plan.dailyMin || amount > plan.dailyMax) {
+                throw new Error(`Payment amount must be between PKR ${plan.dailyMin} and PKR ${plan.dailyMax} for daily contribution`);
             }
         } else if (carParticipation.phase === ParticipationPhase.POST_WIN) {
-            if (amount !== POST_WIN_MONTHLY) {
-                throw new Error(`Payment amount must be PKR ${POST_WIN_MONTHLY} for post-win monthly payment`);
+            if (amount !== plan.postWinMonthly) {
+                throw new Error(`Payment amount must be PKR ${plan.postWinMonthly} for post-win monthly payment`);
             }
         }
 
@@ -69,10 +67,10 @@ export class CarContributionsService {
         let carAwardedNow = false;
 
         // Check if threshold reached for direct car award
-        if (carParticipation.phase === ParticipationPhase.PRE_WIN && 
-            carParticipation.totalPaid >= THRESHOLD_AMOUNT && 
+        if (carParticipation.phase === ParticipationPhase.PRE_WIN &&
+            carParticipation.totalPaid >= plan.directAwardThreshold &&
             !carParticipation.carAwarded) {
-            
+
             carParticipation.carAwarded = true;
             carParticipation.carAwardedDate = new Date();
             carParticipation.phase = ParticipationPhase.POST_WIN;
@@ -96,8 +94,8 @@ export class CarContributionsService {
         }
 
         // Check if post-win payment completed
-        if (carParticipation.phase === ParticipationPhase.POST_WIN && 
-            carParticipation.totalPaid >= CAR_PRICE) {
+        if (carParticipation.phase === ParticipationPhase.POST_WIN &&
+            carParticipation.totalPaid >= plan.targetAmount) {
             carParticipation.phase = ParticipationPhase.COMPLETED;
             carParticipation.status = ParticipationStatus.COMPLETED;
         }
@@ -107,8 +105,9 @@ export class CarContributionsService {
         return {
             contribution,
             participation: carParticipation,
+            plan,
             message: carAwardedNow
-                ? `Congratulations! You have reached PKR ${THRESHOLD_AMOUNT.toLocaleString()} and been awarded a car! Your monthly payment is now PKR 36,000.`
+                ? `Congratulations! You have reached PKR ${plan.directAwardThreshold.toLocaleString()} and been awarded a car! Your monthly payment is now PKR ${plan.postWinMonthly.toLocaleString()}.`
                 : 'Payment successful'
         };
     }
@@ -174,12 +173,13 @@ export class CarContributionsService {
             ? contributions.sort((a, b) => new Date((b as any).createdAt).getTime() - new Date((a as any).createdAt).getTime())[0]
             : null;
 
-        let targetAmount = CAR_PRICE;
+        const plan = getCarPlan(participation.planId);
+        let targetAmount = plan.targetAmount;
         // Ensure numeric math for progress
         let progressPercentage = (Number(participation.totalPaid || 0) / targetAmount) * 100;
 
         if (participation.phase === ParticipationPhase.PRE_WIN) {
-            targetAmount = THRESHOLD_AMOUNT;
+            targetAmount = plan.directAwardThreshold;
             progressPercentage = (Number(participation.totalPaid || 0) / targetAmount) * 100;
         }
 
@@ -214,14 +214,16 @@ export class CarContributionsService {
         return {
             hasJoined: true,
             participation,
+            planId: participation.planId,
+            plan,
             totalContributions,
             totalPaid: participation.totalPaid,
             targetAmount,
             progressPercentage,
             lastPayment,
-            paymentRange: participation.phase === ParticipationPhase.PRE_WIN 
-                ? { min: PRE_WIN_MIN, max: PRE_WIN_MAX }
-                : { min: POST_WIN_MONTHLY, max: POST_WIN_MONTHLY },
+            paymentRange: participation.phase === ParticipationPhase.PRE_WIN
+                ? { min: plan.dailyMin, max: plan.dailyMax }
+                : { min: plan.postWinMonthly, max: plan.postWinMonthly },
             remainingAmount: Math.max(0, targetAmount - participation.totalPaid),
             referralCode: referralCode || null,
             totalReferralEarnings: user?.totalReferralEarnings || 0,

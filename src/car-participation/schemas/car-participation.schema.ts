@@ -2,9 +2,9 @@ import { Prop, Schema, SchemaFactory } from "@nestjs/mongoose";
 import { Schema as MongooseSchema, Types } from "mongoose";
 
 export enum ParticipationPhase {
-    PRE_WIN = 'pre-win', // Paying 50-1500/day
-    POST_WIN = 'post-win', // Paying 36000/month after winning/direct car
-    COMPLETED = 'completed' // Fully paid 3000000
+    PRE_WIN = 'pre-win', // Paying the plan's daily contribution range (see car-plans.ts)
+    POST_WIN = 'post-win', // Paying the plan's monthly amount after winning/direct car award
+    COMPLETED = 'completed' // Fully paid the plan's target amount
 }
 
 export enum ParticipationStatus {
@@ -20,6 +20,11 @@ export class CarParticipation {
 
     @Prop({required:true,unique:true})
     coupenNumber!: string;
+
+    // Which of the 4 car plans (see car-plans.ts) this participation is contributing toward.
+    // Defaults to 1 (the original/only plan) so pre-existing participations behave unchanged.
+    @Prop({required:true,default:1,min:1,max:4})
+    planId!: number;
 
     @Prop({default:0})
     totalPaid!: number;

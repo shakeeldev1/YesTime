@@ -6,10 +6,16 @@ import { CarParticipationService } from './car-participation.service';
 export class CarParticipationController {
     constructor(private readonly carParticipationService: CarParticipationService) { }
 
+    // Public endpoint - lets the join flow show full pricing info for every plan before choosing one.
+    @Get("plans")
+    getPlans() {
+        return this.carParticipationService.getPlans();
+    }
+
     @Post("join")
     @UseGuards(JwtAuthGuard)
-    join(@Request() req, @Body() body?: { referralCode?: string; referredByUserId?: string }) {
-        return this.carParticipationService.join(req.user.userId, body?.referralCode, body?.referredByUserId);
+    join(@Request() req, @Body() body?: { planId?: number; referralCode?: string; referredByUserId?: string }) {
+        return this.carParticipationService.join(req.user.userId, body?.planId, body?.referralCode, body?.referredByUserId);
     }
 
     @Get("my-participation")
