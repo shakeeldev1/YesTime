@@ -25,11 +25,25 @@ export class CarContributionsService {
     ) { }
 
     async create(userId: string, carParticipationId: string, amount: number) {
+        // Without this guard, an invalid ObjectId string reaches findById and throws an
+        // uncaught Mongoose CastError, which this app has no global filter for - it would
+        // otherwise surface as a generic 500 instead of a clear 400.
+        if (!Types.ObjectId.isValid(carParticipationId)) {
+            throw new BadRequestException('Invalid participationId.');
+        }
+
         const carParticipation = await this.carParticipationModel.findById(carParticipationId);
         if (!carParticipation) throw new NotFoundException('Car participation not found');
         if (carParticipation.userId.toString() !== userId) throw new BadRequestException('You can only contribute to your own car participation.');
 
         const plan = getCarPlan(carParticipation.planId);
+
+        // A completed plan has nothing left to pay - block further contributions outright
+        // (previously this phase fell through both branches below with NO validation at all,
+        // silently accepting any amount and still paying out a referral bonus indefinitely).
+        if (carParticipation.phase === ParticipationPhase.COMPLETED) {
+            throw new BadRequestException('This car ownership plan has already been completed - no further contributions are needed.');
+        }
 
         // Validate amount based on phase
         if (carParticipation.phase === ParticipationPhase.PRE_WIN) {

@@ -14,8 +14,13 @@ export class CarParticipationController {
 
     @Post("join")
     @UseGuards(JwtAuthGuard)
-    join(@Request() req, @Body() body?: { planId?: number; referralCode?: string; referredByUserId?: string }) {
-        return this.carParticipationService.join(req.user.userId, body?.planId, body?.referralCode, body?.referredByUserId);
+    join(@Request() req, @Body() body?: { planId?: number | string; referralCode?: string; referredByUserId?: string }) {
+        // No global ValidationPipe in this app, so a JSON string like "2" would otherwise
+        // fail isValidCarPlanId's strict typeof check even though it's a valid plan choice.
+        const planId = body?.planId === undefined || body?.planId === null || body?.planId === ''
+            ? undefined
+            : Number(body.planId);
+        return this.carParticipationService.join(req.user.userId, planId, body?.referralCode, body?.referredByUserId);
     }
 
     @Get("my-participation")

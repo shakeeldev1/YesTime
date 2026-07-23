@@ -63,8 +63,16 @@ export class CarParticipationService {
     async join(userId: string, planId?: number, referralCode?: string, referredByUserId?: string) {
         const existingParticipation = await this.carParticipationModel.findOne({ userId });
         if (existingParticipation) {
+            // A participation's plan is locked in forever at first join - calling join again
+            // with a different planId does NOT create a second participation or switch plans.
+            // Make that explicit instead of silently returning the old plan with no explanation.
+            const planMismatch = planId !== undefined && planId !== existingParticipation.planId;
             return {
-                message: "User has already joined",
+                message: planMismatch
+                    ? `You already joined on ${getCarPlan(existingParticipation.planId).name}. A participation's plan can't be changed after joining, so Plan ${planId} was not applied.`
+                    : "User has already joined",
+                participationId: existingParticipation._id,
+                planMismatch,
                 coupen: existingParticipation.coupenNumber,
                 planId: existingParticipation.planId,
                 plan: getCarPlan(existingParticipation.planId),
@@ -99,6 +107,7 @@ export class CarParticipationService {
         const plan = getCarPlan(resolvedPlanId);
         return {
             message: `User joined successfully on ${plan.name} (target PKR ${plan.targetAmount.toLocaleString()})`,
+            participationId: newParticipation._id,
             coupen: coupenNumber,
             planId: resolvedPlanId,
             plan,
