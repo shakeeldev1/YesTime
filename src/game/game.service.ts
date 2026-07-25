@@ -65,11 +65,14 @@ export class GameService {
   // A token is eligible to play as soon as it has an investment that hasn't been used in
   // a draw yet - investing PKR 50 again immediately re-arms it for another play, with no
   // calendar-day wait. Reward still climbs by PKR 1,000 per PKR 50 invested (capped at 30).
+  private getUnplayedInvestmentCount(token: GameCycle): number {
+    const invested = Math.floor(this.getTokenInvestedValue(token) / this.INVESTMENT_AMOUNT);
+    const playsUsed = Number((token as any).playsUsedThisCycle || 0);
+    return Math.max(0, invested - playsUsed);
+  }
+
   private hasUnplayedInvestment(token: GameCycle): boolean {
-    const lastPaymentTime = (token as any).lastPaymentDate ? new Date((token as any).lastPaymentDate).getTime() : 0;
-    if (!lastPaymentTime) return false;
-    const lastParticipatedTime = (token as any).lastParticipatedAt ? new Date((token as any).lastParticipatedAt).getTime() : 0;
-    return lastPaymentTime > lastParticipatedTime;
+    return this.getUnplayedInvestmentCount(token) > 0;
   }
 
   private isQueued(token: GameCycle): boolean {
@@ -79,7 +82,7 @@ export class GameService {
   private canParticipateToday(token: GameCycle, _referenceDate = new Date()): boolean {
     if (this.isPermanentToken(token)) return false;
     if (this.isQueued(token)) return false;
-    return this.hasUnplayedInvestment(token);
+    return this.getUnplayedInvestmentCount(token) > 0;
   }
 
   private getNextEligiblePlayDateForToken(token: GameCycle, referenceDate = new Date()): Date {
@@ -103,7 +106,7 @@ export class GameService {
     const eligibleToday = this.canParticipateToday(token, referenceDate);
     const queued = this.isQueued(token);
     const permanent = this.isPermanentToken(token);
-    const unplayedInvestment = this.hasUnplayedInvestment(token);
+    const unplayedInvestmentCount = this.getUnplayedInvestmentCount(token);
 
     return {
       id: token._id,
@@ -121,10 +124,10 @@ export class GameService {
       isPermanent: permanent,
       permanentPrizeAmount: Number((token as any).permanentPrizeAmount || (permanent ? this.MAX_REWARD : 0)),
       autoJoinEnabledForCurrentCycle: Boolean((token as any).autoJoinEnabledForCurrentCycle),
-      hasPlayedCurrentCycle: !unplayedInvestment && !permanent,
-      playsPurchased: unplayedInvestment ? 1 : 0,
-      playsUsed: unplayedInvestment ? 0 : 1,
-      playsRemaining: eligibleToday ? 1 : 0,
+      hasPlayedCurrentCycle: unplayedInvestmentCount === 0 && !permanent,
+      playsPurchased: unplayedInvestmentCount,
+      playsUsed: Math.max(0, Math.floor(this.getTokenInvestedValue(token) / this.INVESTMENT_AMOUNT) - unplayedInvestmentCount),
+      playsRemaining: eligibleToday ? unplayedInvestmentCount : 0,
       queuedForNextRound: queued,
       participationMode: (token as any).participationMode || 'none',
       currentDay,
