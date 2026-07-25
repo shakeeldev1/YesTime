@@ -103,21 +103,67 @@ export class WalletService {
         return text.replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
     }
 
+    private transactionReferenceMatches(rawText: string, submittedTransactionReference: string): boolean {
+        const normalizedRawText = this.normalizeTextForComparison(rawText);
+        const normalizedSubmittedTid = this.normalizeTextForComparison(submittedTransactionReference);
+        if (!normalizedSubmittedTid) {
+            return false;
+        }
+
+        if (normalizedRawText.includes(normalizedSubmittedTid)) {
+            return true;
+        }
+
+        const minTailLength = Math.min(8, normalizedSubmittedTid.length);
+        const tail = normalizedSubmittedTid.slice(-minTailLength);
+        return tail.length >= 4 && normalizedRawText.includes(tail);
+    }
+
     private normalizeAmountValue(value: string | number): number | null {
-        const normalized = String(value).replace(/[ ,RsPKR\$\u20B9]/g, '').replace(/[^0-9.]/g, '');
+        const normalized = String(value)
+            .replace(/[\s,RsPKR\$\u20B9]/g, '')
+            .replace(/[^0-9.]/g, '');
         const parsed = Number(normalized);
         return Number.isFinite(parsed) ? parsed : null;
     }
 
-    private extractAmountFromText(text: string): number | null {
-        const candidates = Array.from(text.matchAll(/\d{1,3}(?:[.,]\d{3})*(?:\.\d{1,2})?/g));
-        for (const match of candidates) {
-            const normalized = this.normalizeAmountValue(match[0]);
-            if (normalized !== null) {
-                return normalized;
+    private extractAmountFromText(text: string, submittedAmount?: number): number | null {
+        const rawCandidates = Array.from(text.matchAll(/\d+(?:[.,]\d{3})*(?:\.\d{1,2})?/g));
+        const candidates = rawCandidates
+            .map((match) => this.normalizeAmountValue(match[0]))
+            .filter((value): value is number => value !== null);
+
+        if (candidates.length === 0) {
+            return null;
+        }
+
+        if (submittedAmount !== undefined) {
+            const submittedValue = this.normalizeAmountValue(submittedAmount);
+            if (submittedValue !== null) {
+                const exactMatch = candidates.find((value) => Math.abs(value - submittedValue) < 0.01);
+                if (exactMatch !== undefined) {
+                    return exactMatch;
+                }
             }
         }
-        return null;
+
+        const lines = text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+        const positiveKeywords = ['amount', 'total', 'paid', 'transferred', 'transfer', 'deposit', 'received', 'credited'];
+        const negativeKeywords = ['fee', 'charge', 'balance', 'available', 'vat', 'tax'];
+
+        for (const line of lines) {
+            const lower = line.toLowerCase();
+            if (positiveKeywords.some((key) => lower.includes(key)) && !negativeKeywords.some((key) => lower.includes(key))) {
+                const lineCandidates = Array.from(line.matchAll(/\d+(?:[.,]\d{3})*(?:\.\d{1,2})?/g))
+                    .map((match) => this.normalizeAmountValue(match[0]))
+                    .filter((value): value is number => value !== null);
+                if (lineCandidates.length > 0) {
+                    return lineCandidates[0];
+                }
+            }
+        }
+
+        return candidates.sort((a, b) => b - a)[0];
     }
 
     private extractDateFromText(text: string): Date | null {
@@ -191,13 +237,10 @@ export class WalletService {
             throw new BadRequestException('OCR did not find any readable text in the receipt image. Please try again.');
         }
 
-        const normalizedRawText = this.normalizeTextForComparison(rawText);
-        const normalizedSubmittedTid = this.normalizeTextForComparison(submittedTransactionReference);
-        const tidFound = normalizedRawText.includes(normalizedSubmittedTid);
-
-        const extractedAmount = this.extractAmountFromText(rawText);
+        const tidFound = this.transactionReferenceMatches(rawText, submittedTransactionReference);
+        const extractedAmount = this.extractAmountFromText(rawText, submittedAmount);
         const submittedNormalizedAmount = this.normalizeAmountValue(submittedAmount);
-        const amountMatch = extractedAmount !== null && submittedNormalizedAmount !== null && extractedAmount === submittedNormalizedAmount;
+        const amountMatch = extractedAmount !== null && submittedNormalizedAmount !== null && Math.abs(extractedAmount - submittedNormalizedAmount) < 0.02;
 
         if (!tidFound || !amountMatch) {
             throw new BadRequestException('OCR verification failed: submitted transaction reference or amount did not match the receipt. Please try again with a clearer screenshot and correct values.');
