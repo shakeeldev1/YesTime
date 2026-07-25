@@ -27,6 +27,27 @@ export class DepositRequest extends Document {
   paymentScreenshotUrl!: string;
 
   @Prop()
+  ocrRawText?: string;
+
+  @Prop()
+  ocrParsedTransactionReference?: string;
+
+  @Prop()
+  ocrParsedAmount?: number;
+
+  @Prop()
+  ocrParsedDate?: Date;
+
+  @Prop()
+  ocrParsedReceiver?: string;
+
+  @Prop()
+  ocrParsedBankName?: string;
+
+  @Prop({ default: false })
+  ocrVerified!: boolean;
+
+  @Prop()
   note?: string;
 
   @Prop({ enum: ['pending', 'approved', 'rejected'], default: 'pending' })

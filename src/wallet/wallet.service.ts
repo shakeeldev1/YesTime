@@ -68,6 +68,7 @@ export class WalletService {
         }
 
         const uploaded = await this.cloudinaryService.uploadImage(paymentScreenshot, 'yes-time/payments');
+        const ocrResult = await this.verifyReceiptOcr(uploaded.secure_url, dto.transactionReference.trim(), Number(dto.amount));
         const request = new this.depositRequestModel({
             userId,
             amount: dto.amount,
@@ -78,6 +79,13 @@ export class WalletService {
             note: dto.note,
             paymentScreenshotUrl: uploaded.secure_url,
             status: 'pending',
+            ocrRawText: ocrResult.rawText,
+            ocrParsedTransactionReference: ocrResult.transactionReference,
+            ocrParsedAmount: ocrResult.amount,
+            ocrParsedDate: ocrResult.date,
+            ocrParsedReceiver: ocrResult.receiver,
+            ocrParsedBankName: ocrResult.bankName,
+            ocrVerified: ocrResult.verified,
         });
 
         try {
@@ -89,6 +97,125 @@ export class WalletService {
             throw error;
         }
         return request;
+    }
+
+    private normalizeTextForComparison(text: string) {
+        return text.replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
+    }
+
+    private normalizeAmountValue(value: string | number): number | null {
+        const normalized = String(value).replace(/[ ,RsPKR\$\u20B9]/g, '').replace(/[^0-9.]/g, '');
+        const parsed = Number(normalized);
+        return Number.isFinite(parsed) ? parsed : null;
+    }
+
+    private extractAmountFromText(text: string): number | null {
+        const candidates = Array.from(text.matchAll(/\d{1,3}(?:[.,]\d{3})*(?:\.\d{1,2})?/g));
+        for (const match of candidates) {
+            const normalized = this.normalizeAmountValue(match[0]);
+            if (normalized !== null) {
+                return normalized;
+            }
+        }
+        return null;
+    }
+
+    private extractDateFromText(text: string): Date | null {
+        const datePatterns = [
+            /\b(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2,4})\b/g,
+            /\b(\d{4})[\/\-.](\d{1,2})[\/\-.](\d{1,2})\b/g,
+        ];
+
+        for (const pattern of datePatterns) {
+            let match: RegExpExecArray | null;
+            while ((match = pattern.exec(text)) !== null) {
+                const candidate = match[0].replace(/[.\-]/g, '/');
+                const parsed = new Date(candidate);
+                if (!Number.isNaN(parsed.getTime())) {
+                    return parsed;
+                }
+            }
+        }
+        return null;
+    }
+
+    private extractReceiverFromText(text: string): string | null {
+        const lines = text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+        const receiverKeys = ['receiver', 'beneficiary', 'payee', 'to', 'account name', 'received by'];
+        for (const line of lines) {
+            const lower = line.toLowerCase();
+            if (receiverKeys.some((key) => lower.includes(key))) {
+                return line;
+            }
+        }
+        return null;
+    }
+
+    private extractBankNameFromText(text: string): string | null {
+        const lines = text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+        const bankKeywords = ['bank', 'easypaisa', 'jazzcash', 'upi', 'account', 'branch', 'payorder'];
+        for (const line of lines) {
+            const lower = line.toLowerCase();
+            if (bankKeywords.some((key) => lower.includes(key))) {
+                return line;
+            }
+        }
+        return null;
+    }
+
+    private async verifyReceiptOcr(imageUrl: string, submittedTransactionReference: string, submittedAmount: number) {
+        const ocrApiKey = process.env.OCR_SPACE_API_KEY;
+        if (!ocrApiKey) {
+            throw new BadRequestException('OCR service is not configured. Please contact support.');
+        }
+
+        const formData = new FormData();
+        formData.append('url', imageUrl);
+        formData.append('apikey', ocrApiKey);
+        formData.append('language', 'eng');
+        formData.append('isOverlayRequired', 'false');
+        formData.append('OCREngine', '2');
+
+        const response = await fetch('https://api.ocr.space/parse/image', {
+            method: 'POST',
+            body: formData,
+        });
+
+        const data = await response.json();
+        if (!data || data.IsErroredOnProcessing || !Array.isArray(data.ParsedResults) || data.ParsedResults.length === 0) {
+            throw new BadRequestException('OCR verification failed. Please try again with a clearer receipt image.');
+        }
+
+        const rawText = String(data.ParsedResults[0].ParsedText || '').trim();
+        if (!rawText) {
+            throw new BadRequestException('OCR did not find any readable text in the receipt image. Please try again.');
+        }
+
+        const normalizedRawText = this.normalizeTextForComparison(rawText);
+        const normalizedSubmittedTid = this.normalizeTextForComparison(submittedTransactionReference);
+        const tidFound = normalizedRawText.includes(normalizedSubmittedTid);
+
+        const extractedAmount = this.extractAmountFromText(rawText);
+        const submittedNormalizedAmount = this.normalizeAmountValue(submittedAmount);
+        const amountMatch = extractedAmount !== null && submittedNormalizedAmount !== null && extractedAmount === submittedNormalizedAmount;
+
+        if (!tidFound || !amountMatch) {
+            throw new BadRequestException('OCR verification failed: submitted transaction reference or amount did not match the receipt. Please try again with a clearer screenshot and correct values.');
+        }
+
+        const parsedDate = this.extractDateFromText(rawText);
+        const receiver = this.extractReceiverFromText(rawText);
+        const bankName = this.extractBankNameFromText(rawText);
+
+        return {
+            rawText,
+            transactionReference: submittedTransactionReference,
+            amount: submittedAmount,
+            date: parsedDate || undefined,
+            receiver: receiver || undefined,
+            bankName: bankName || undefined,
+            verified: true,
+        };
     }
 
     async getMyDepositRequests(userId: string) {
