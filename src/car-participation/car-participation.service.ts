@@ -60,7 +60,7 @@ export class CarParticipationService {
     // (a raw user id) is accepted too for backwards compatibility. planId picks which of
     // the 4 car plans (car-plans.ts) to join - defaults to Plan 1 if omitted, so existing
     // callers that don't send a plan keep behaving exactly as before.
-    async join(userId: string, planId?: number, referralCode?: string, referredByUserId?: string) {
+    async join(userId: string, planId?: number, referralCode?: string, referredByUserId?: string, joinWithQurandazi: boolean = true) {
         const existingParticipation = await this.carParticipationModel.findOne({ userId });
         if (existingParticipation) {
             // A participation's plan is locked in forever at first join - calling join again
@@ -97,7 +97,7 @@ export class CarParticipationService {
         }
 
         const coupenNumber = await this.generateUniqueCoupen();
-        const participationData: any = { userId, coupenNumber, planId: resolvedPlanId };
+        const participationData: any = { userId, coupenNumber, planId: resolvedPlanId, joinWithQurandazi };
         if (referrerId) {
             participationData.referredBy = new Types.ObjectId(referrerId);
         }
@@ -115,7 +115,15 @@ export class CarParticipationService {
     }
 
     async getParticipation(userId: string) {
-        return await this.carParticipationModel.findOne({ userId });
+        const participation = await this.carParticipationModel.findOne({ userId });
+        if (!participation) {
+            return null;
+        }
+
+        return {
+            ...participation.toObject(),
+            joinWithQurandazi: participation.joinWithQurandazi ?? true,
+        };
     }
 
     private getUtcDayRange(reference: Date): { start: Date; end: Date } {

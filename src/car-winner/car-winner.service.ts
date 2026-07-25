@@ -46,6 +46,7 @@ export class CarWinnerService {
             phase: ParticipationPhase.PRE_WIN,
             hasWon: false,
             carAwarded: false,
+            joinWithQurandazi: { $ne: false },
             coupenNumber: { $in: pendingPlayEntries.map((entry) => entry.coupenNumber) },
         }).populate('userId');
 

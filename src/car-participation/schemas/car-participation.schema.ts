@@ -53,6 +53,11 @@ export class CarParticipation {
     // Referral tracking
     @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'User' })
     referredBy?: Types.ObjectId;
+
+    // Whether this participation should be included in future qurandazi/spinner draws.
+    // Defaults to true for backward compatibility with older records that predate this flag.
+    @Prop({ default: true })
+    joinWithQurandazi!: boolean;
 }
 
 export const CarParticipationSchema = SchemaFactory.createForClass(CarParticipation);

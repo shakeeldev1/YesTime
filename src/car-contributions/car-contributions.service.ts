@@ -227,7 +227,10 @@ export class CarContributionsService {
 
         return {
             hasJoined: true,
-            participation,
+            participation: {
+                ...participation.toObject(),
+                joinWithQurandazi: participation.joinWithQurandazi ?? true,
+            },
             planId: participation.planId,
             plan,
             totalContributions,
