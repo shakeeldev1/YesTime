@@ -23,6 +23,21 @@ export class CarWinnerService {
         return String(Math.floor(100000 + Math.random() * 900000));
     }
 
+    // The shared draw-scheduler rotates 4 modules every minute (registration -> car ->
+    // game -> cashback), so THIS module only actually draws once every 4 minutes, on
+    // whichever future minute boundary lands on rotation slot 1. Must stay in sync with
+    // the rotation order in draw-scheduler.service.ts.
+    private readonly ROTATION_SLOT = 1;
+    private readonly ROTATION_SIZE = 4;
+
+    private computeNextDrawTime(now: Date): Date {
+        const currentMinuteIndex = Math.floor(now.getTime() / 60000);
+        const currentSlot = currentMinuteIndex % this.ROTATION_SIZE;
+        let minutesUntil = (this.ROTATION_SLOT - currentSlot + this.ROTATION_SIZE) % this.ROTATION_SIZE;
+        if (minutesUntil === 0) minutesUntil = this.ROTATION_SIZE;
+        return new Date((currentMinuteIndex + minutesUntil) * 60000);
+    }
+
     async spinAndSelectWinner() {
         const pendingPlayEntries = await this.carPlayEntryModel.find({ status: 'pending' });
         const drawDate = new Date();
@@ -147,9 +162,7 @@ export class CarWinnerService {
 
     async getNextDrawInfo() {
         const now = new Date();
-        const nextDrawTime = new Date(now);
-        nextDrawTime.setSeconds(0, 0);
-        nextDrawTime.setMinutes(now.getMinutes() + 1);
+        const nextDrawTime = this.computeNextDrawTime(now);
         const countdown = Math.max(0, Math.floor((nextDrawTime.getTime() - now.getTime()) / 1000));
         const totalWinners = await this.carWinnerModel.countDocuments();
         const latestWinner = await this.carWinnerModel.findOne().sort({ winningDate: -1 });

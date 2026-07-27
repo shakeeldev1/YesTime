@@ -34,6 +34,21 @@ export class GameService {
     return String(Math.floor(100000 + Math.random() * 900000));
   }
 
+  // The shared draw-scheduler rotates 4 modules every minute (registration -> car ->
+  // game -> cashback), so THIS module only actually draws once every 4 minutes, on
+  // whichever future minute boundary lands on rotation slot 2. Must stay in sync with
+  // the rotation order in draw-scheduler.service.ts.
+  private readonly ROTATION_SLOT = 2;
+  private readonly ROTATION_SIZE = 4;
+
+  private computeNextDrawTime(now: Date): Date {
+    const currentMinuteIndex = Math.floor(now.getTime() / 60000);
+    const currentSlot = currentMinuteIndex % this.ROTATION_SIZE;
+    let minutesUntil = (this.ROTATION_SLOT - currentSlot + this.ROTATION_SIZE) % this.ROTATION_SIZE;
+    if (minutesUntil === 0) minutesUntil = this.ROTATION_SIZE;
+    return new Date((currentMinuteIndex + minutesUntil) * 60000);
+  }
+
   private normalizeDate(date: Date): Date {
     const normalized = new Date(date);
     normalized.setHours(0, 0, 0, 0);
@@ -448,6 +463,7 @@ export class GameService {
 
           winnerToken.set({
             totalWins: Number((winnerToken as any).totalWins || 0) + 1,
+            playsUsedThisCycle: Number((winnerToken as any).playsUsedThisCycle || 0) + 1,
             hasPlayedCurrentCycle: true,
             lastParticipatedAt: now,
             queuedForNextRound: false,
@@ -487,6 +503,7 @@ export class GameService {
 
           token.set({
             totalLosses: Number((token as any).totalLosses || 0) + 1,
+            playsUsedThisCycle: Number((token as any).playsUsedThisCycle || 0) + 1,
             hasPlayedCurrentCycle: true,
             lastParticipatedAt: now,
             queuedForNextRound: false,
@@ -547,18 +564,8 @@ export class GameService {
     const lastDraw = await this.drawModel.findOne().sort({ drawDate: -1 });
     const totalParticipants = await this.cycleModel.countDocuments({ queuedForNextRound: true });
     const now = new Date();
-    let nextDrawTime: Date;
-    let drawNumber: number;
-
-    if (!lastDraw) {
-      nextDrawTime = new Date(now);
-      nextDrawTime.setSeconds(0, 0);
-      nextDrawTime.setMinutes(now.getMinutes() + 1);
-      drawNumber = 1;
-    } else {
-      nextDrawTime = new Date(lastDraw.drawDate.getTime() + 60000);
-      drawNumber = lastDraw.drawNumber + 1;
-    }
+    const nextDrawTime = this.computeNextDrawTime(now);
+    const drawNumber = lastDraw ? lastDraw.drawNumber + 1 : 1;
 
     const countdown = Math.max(0, Math.floor((nextDrawTime.getTime() - now.getTime()) / 1000));
 

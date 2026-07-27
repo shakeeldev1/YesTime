@@ -37,6 +37,10 @@ export class CarParticipationService {
             phase: ParticipationPhase.PRE_WIN,
             hasWon: false,
             carAwarded: false,
+            // Users who opted out of the spinner draw can never win it (see
+            // car-winner.service.ts's eligibleCoupons filter), so don't let them spend a
+            // play entering a draw they have zero chance of winning.
+            joinWithQurandazi: { $ne: false },
         });
     }
 
