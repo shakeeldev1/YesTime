@@ -224,6 +224,19 @@ export class CarWinnerService {
         }));
     }
 
+    // Draws with no winner are just a timestamp + a random coupon - once they're a day old
+    // they're no longer useful and just take up space, so they're pruned. The CarWinner
+    // collection (the permanent winners ledger) is untouched either way, and any SpinnerDraw
+    // round that actually produced a winner (winnerId set) is kept forever too.
+    async pruneOldEmptyDraws() {
+        const cutoff = new Date(Date.now() - 24 * 60 * 60 * 1000);
+        const result = await this.spinnerDrawModel.deleteMany({
+            drawDate: { $lt: cutoff },
+            $or: [{ winnerId: null }, { winnerId: { $exists: false } }],
+        });
+        return result.deletedCount || 0;
+    }
+
     async getWinnerStats() {
         const totalWinners = await this.carWinnerModel.countDocuments();
         const spinnerWins = await this.carWinnerModel.countDocuments({ winType: 'spinner' });

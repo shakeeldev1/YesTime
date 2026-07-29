@@ -554,6 +554,18 @@ export class GameService {
     return this.drawModel.find().sort({ drawDate: -1 }).limit(limit);
   }
 
+  // Draws with no winner are just a timestamp + a random number - once they're a day old
+  // they're no longer useful and just take up space, so they're pruned. Any draw that
+  // actually produced a winner (winnerUserId set) is kept forever.
+  async pruneOldEmptyDraws() {
+    const cutoff = new Date(Date.now() - 24 * 60 * 60 * 1000);
+    const result = await this.drawModel.deleteMany({
+      drawDate: { $lt: cutoff },
+      $or: [{ winnerUserId: null }, { winnerUserId: { $exists: false } }],
+    });
+    return result.deletedCount || 0;
+  }
+
   async getWinningHistory(userId: string) {
     const draws = await this.drawModel.find({ winnerUserId: userId }).sort({ drawDate: -1 });
     const totalWon = draws.reduce((sum, draw) => sum + draw.prizeAmount, 0);

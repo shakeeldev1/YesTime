@@ -46,6 +46,32 @@ export class DrawSchedulerService {
   }
 
   /**
+   * Every module draws once every 4 minutes (360 draws/day), and the vast majority never
+   * produce a winner - those empty draws (just a timestamp + a random number) are pure
+   * clutter once they're a day old. This keeps only the last 24 hours of empty draws;
+   * any draw that actually produced a winner is kept forever by each module's own
+   * pruneOldEmptyDraws() filter.
+   */
+  @Cron(CronExpression.EVERY_DAY_AT_MIDNIGHT)
+  async handleDailyCleanup() {
+    const [registration, car, game, cashback] = await Promise.allSettled([
+      this.registrationLotteryService.pruneOldEmptyDraws(),
+      this.carWinnerService.pruneOldEmptyDraws(),
+      this.gameService.pruneOldEmptyDraws(),
+      this.cashbackService.pruneOldEmptyDraws(),
+    ]);
+
+    this.logger.log(
+      `Daily empty-draw cleanup: registration=${this.settledCount(registration)}, ` +
+      `car=${this.settledCount(car)}, game=${this.settledCount(game)}, cashback=${this.settledCount(cashback)}`,
+    );
+  }
+
+  private settledCount(result: PromiseSettledResult<number>): string {
+    return result.status === 'fulfilled' ? String(result.value) : `error: ${result.reason}`;
+  }
+
+  /**
    * PUBLIC: Live draw status across all 4 modules - which one is drawing right now,
    * its countdown, and the latest result (winner info if anyone won). Used to show
    * users a live lottery feed so they can watch the draws happen in real time.
