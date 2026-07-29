@@ -13,6 +13,11 @@ export class CarWinner {
     @Prop({required:true})
     winningCoupen!: string;
 
+    // Matches the SpinnerDraw round this win occurred in, so history/notification views
+    // can show "Draw #N" instead of leaving it blank.
+    @Prop()
+    drawNumber?: number;
+
     @Prop()
     winningDate: Date = new Date();
 

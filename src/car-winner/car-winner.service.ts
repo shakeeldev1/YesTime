@@ -38,14 +38,23 @@ export class CarWinnerService {
         return new Date((currentMinuteIndex + minutesUntil) * 60000);
     }
 
+    // The persisted draw-round sequence - every tick gets the next number, whether or
+    // not it produced a winner, matching how the other lottery modules (cashback/game/
+    // registration-lottery) number their draws.
+    private async getNextDrawNumber(): Promise<number> {
+        const lastDraw = await this.spinnerDrawModel.findOne().sort({ drawNumber: -1 });
+        return (lastDraw?.drawNumber || 0) + 1;
+    }
+
     async spinAndSelectWinner() {
         const pendingPlayEntries = await this.carPlayEntryModel.find({ status: 'pending' });
         const drawDate = new Date();
+        const drawNumber = await this.getNextDrawNumber();
 
         if (pendingPlayEntries.length === 0) {
             const winningCoupon = this.generateRandom6DigitCoupon();
-            await this.spinnerDrawModel.deleteMany({});
             const spinnerDraw = new this.spinnerDrawModel({
+                drawNumber,
                 drawDate,
                 winningCoupen: winningCoupon,
                 status: 'completed',
@@ -53,7 +62,7 @@ export class CarWinnerService {
                 spinEndTime: new Date(),
             } as any);
             await spinnerDraw.save();
-            return { message: 'No participants in this draw', winner: null, winningCoupon };
+            return { message: 'No participants in this draw', winner: null, winningCoupon, drawNumber };
         }
 
         const eligibleParticipations = await this.carParticipationModel.find({
@@ -95,21 +104,21 @@ export class CarWinnerService {
             ? eligibleParticipations.find((participant) => participant.coupenNumber === winnerCoupenNumber) || null
             : null;
 
-        // Record only the latest spinner draw (delete previous to keep one document)
+        // Persist every draw round (win or not) so draw-history actually has something to
+        // show - this used to delete all prior rounds and keep only the latest, which is
+        // why history never showed more than one entry.
         const spinnerDoc = {
+            drawNumber,
             drawDate,
             winningCoupen: winningCoupon,
             winnerId: winner ? winner.userId : undefined,
             status: 'completed',
             spinStartTime: drawDate,
             spinEndTime: new Date()
-        } as any; // intentionally not storing drawNumber to save space
+        } as any;
 
-        // Remove old spinner draws and insert the latest one (keeps collection size to 1)
-        await this.spinnerDrawModel.deleteMany({});
         const spinnerDraw = new this.spinnerDrawModel(spinnerDoc);
         await spinnerDraw.save();
-        console.debug('[CarWinner] spinnerSaved (only latest kept)', { winningCoupen: spinnerDraw.winningCoupen, drawDate: spinnerDraw.drawDate });
 
         await this.carPlayEntryModel.updateMany(
             { _id: { $in: consumedIds }, status: 'pending' },
@@ -121,12 +130,10 @@ export class CarWinnerService {
                 message: 'No winner in this draw',
                 winner: null,
                 winningCoupon,
+                drawNumber,
                 totalPlaysThisRound: pendingPlayEntries.length,
             };
         }
-
-        const previousWinnersCount = await this.carWinnerModel.countDocuments();
-        const drawNumber = previousWinnersCount + 1;
 
         winner.hasWon = true;
         winner.carAwarded = true;
@@ -139,6 +146,7 @@ export class CarWinnerService {
             carParticipationId: winner._id,
             userId: winner.userId,
             winningCoupen: winner.coupenNumber,
+            drawNumber,
             winType: 'spinner',
             winningDate: drawDate
         });
@@ -165,39 +173,30 @@ export class CarWinnerService {
         const nextDrawTime = this.computeNextDrawTime(now);
         const countdown = Math.max(0, Math.floor((nextDrawTime.getTime() - now.getTime()) / 1000));
         const totalWinners = await this.carWinnerModel.countDocuments();
-        const latestWinner = await this.carWinnerModel.findOne().sort({ winningDate: -1 });
 
-        // Prefer latest spinner draw (generated every minute) for lastDraw info
-        const latestSpinner = await this.spinnerDrawModel.findOne().sort({ drawDate: -1 });
-
-        const computeDrawNumberFromDate = (d: Date) => Math.floor(d.getTime() / 60000) % 1000000; // minute index mod 1e6
+        // The latest SPINNER DRAW ROUND (win or not) is the correct source for "last draw" -
+        // it reflects every tick, not just the rare rounds that actually produced a winner.
+        const latestSpinner = await this.spinnerDrawModel.findOne().sort({ drawNumber: -1 });
+        const nextDrawNumber = (latestSpinner?.drawNumber || 0) + 1;
 
         let lastDraw: any = null;
         if (latestSpinner && latestSpinner.drawDate) {
             const winnerUser = latestSpinner.winnerId ? await this.userModel.findById(latestSpinner.winnerId) : null;
             lastDraw = {
+                drawNumber: latestSpinner.drawNumber,
                 winningCoupen: latestSpinner.winningCoupen || null,
                 drawDate: latestSpinner.drawDate || null,
                 hasWinner: !!latestSpinner.winnerId,
                 winnerName: winnerUser?.name || null,
             };
-        } else if (latestWinner) {
-            const winnerUser = await this.userModel.findById(latestWinner.userId);
-            lastDraw = {
-                winningCoupen: latestWinner.winningCoupen,
-                drawDate: latestWinner.winningDate,
-                hasWinner: true,
-                winnerName: winnerUser?.name || null,
-            };
         }
-
-        console.debug('[CarWinner] getNextDrawInfo', { totalWinners, lastDrawExists: !!lastDraw });
 
         return {
             serverTime: now,
             nextDrawTime,
             countdown,
-            drawNumber: computeDrawNumberFromDate(nextDrawTime) + 1,
+            drawNumber: nextDrawNumber,
+            totalWinners,
             lastDraw,
         };
     }
@@ -209,12 +208,20 @@ export class CarWinnerService {
             .sort({ winningDate: -1 });
     }
 
+    // Every draw round (win or not), matching the other 3 lottery modules' history semantics -
+    // GET /car-winner/all still exists for a winners-only ledger.
     async getDrawHistory(limit: number = 10) {
-        return this.carWinnerModel.find()
-            .populate('carParticipationId')
-            .populate('userId')
-            .sort({ winningDate: -1 })
-            .limit(limit);
+        const draws = await this.spinnerDrawModel.find().sort({ drawNumber: -1 }).limit(limit);
+        return Promise.all(draws.map(async (draw) => {
+            const winnerUser = draw.winnerId ? await this.userModel.findById(draw.winnerId) : null;
+            return {
+                drawNumber: draw.drawNumber,
+                winningCoupen: draw.winningCoupen || null,
+                drawDate: draw.drawDate,
+                hasWinner: !!draw.winnerId,
+                winnerName: winnerUser?.name || null,
+            };
+        }));
     }
 
     async getWinnerStats() {
