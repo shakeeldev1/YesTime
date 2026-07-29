@@ -196,15 +196,28 @@ export class RegistrationLotteryService {
   async executeLuckyDraw() {
     const pendingLotteries = await this.lotteryModel.find({ isActive: true, pendingDraw: true });
 
+    const lastDraw = await this.drawModel.findOne().sort({ drawNumber: -1 });
+    const drawNumber = lastDraw ? lastDraw.drawNumber + 1 : 1;
+    const winningNumber = this.generateWinningNumber();
+
+    // Persist every draw round, even with zero participants - previously this returned
+    // early with no draw record at all, so draw-history barely grew whenever nobody was
+    // actively entered that round (unlike the cashback/game modules, which always record
+    // a "no participants" draw for every tick).
     if (pendingLotteries.length === 0) {
+      const draw = new this.drawModel({
+        drawNumber,
+        winningNumber,
+        prizeAmount: 0,
+        totalParticipants: 0,
+        drawDate: new Date(),
+        status: 'completed',
+      });
+      await draw.save();
       return { message: 'No participants', draw: null };
     }
 
-    const winningNumber = this.generateWinningNumber();
     const winner = pendingLotteries.find((l) => l.couponNumber === winningNumber);
-
-    const lastDraw = await this.drawModel.findOne().sort({ drawNumber: -1 });
-    const drawNumber = lastDraw ? lastDraw.drawNumber + 1 : 1;
 
     let winnerUserId: string | undefined;
     let winnerCoupon: string | undefined;
