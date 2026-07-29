@@ -9,13 +9,17 @@ describe('CarParticipationService', () => {
       findByReferralCode: jest.fn().mockResolvedValue(null),
     };
 
+    const mailerService = {
+      sendCarAwardEmail: jest.fn().mockResolvedValue(undefined),
+    };
+
     carParticipationModel = jest.fn().mockImplementation((data?: any) => ({
       ...data,
       save: jest.fn().mockResolvedValue({ ...data }),
     }));
     carParticipationModel.findOne = jest.fn().mockResolvedValue(null);
 
-    service = new CarParticipationService(usersService as any);
+    service = new CarParticipationService(usersService as any, mailerService as any);
     (service as any).carParticipationModel = carParticipationModel;
   });
 

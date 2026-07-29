@@ -5,7 +5,6 @@ import { Model, Types } from 'mongoose';
 import { Wallet } from 'src/wallet/schemas/wallet.schema';
 import { CarParticipation, ParticipationPhase, ParticipationStatus } from 'src/car-participation/schemas/car-participation.schema';
 import { getCarPlan } from 'src/car-participation/car-plans';
-import { CarWinner } from 'src/car-winner/schemas/car-winner.schema';
 import { User } from 'src/users/schemas/user.schema';
 import { MailerService } from 'src/mailer/mailer.service';
 import { UsersService } from 'src/users/users.service';
@@ -18,7 +17,6 @@ export class CarContributionsService {
         @InjectModel(CarContribution.name) private carContributionModel: Model<CarContribution>,
         @InjectModel(Wallet.name) private walletModel: Model<Wallet>,
         @InjectModel(CarParticipation.name) private carParticipationModel: Model<CarParticipation>,
-        @InjectModel(CarWinner.name) private carWinnerModel: Model<CarWinner>,
         @InjectModel(User.name) private userModel: Model<User>,
         private mailerService: MailerService,
         private usersService: UsersService,
@@ -78,34 +76,13 @@ export class CarContributionsService {
         // Process referral bonus
         await this.processReferralBonus(carParticipation, amount);
 
-        let carAwardedNow = false;
-
-        // Check if threshold reached for direct car award
-        if (carParticipation.phase === ParticipationPhase.PRE_WIN &&
+        // Reaching directAwardThreshold no longer auto-awards the car - the user must
+        // submit a request (POST /car-participation/request-car) and have an admin approve
+        // it (see CarParticipationService.approveCarRequest). We just surface eligibility
+        // here so the frontend can prompt them to request it.
+        const thresholdReached = carParticipation.phase === ParticipationPhase.PRE_WIN &&
             carParticipation.totalPaid >= plan.directAwardThreshold &&
-            !carParticipation.carAwarded) {
-
-            carParticipation.carAwarded = true;
-            carParticipation.carAwardedDate = new Date();
-            carParticipation.phase = ParticipationPhase.POST_WIN;
-            carAwardedNow = true;
-
-            // Create winner entry
-            const winner = new this.carWinnerModel({
-                carParticipationId: carParticipation._id,
-                userId: carParticipation.userId,
-                winningCoupen: carParticipation.coupenNumber,
-                winType: 'threshold',
-                winningDate: new Date()
-            });
-            await winner.save();
-
-            // Send car award email
-            const user = await this.userModel.findById(userId);
-            if (user) {
-                await this.mailerService.sendCarAwardEmail(user.email, user.name, 'direct');
-            }
-        }
+            !carParticipation.carAwarded;
 
         // Check if post-win payment completed
         if (carParticipation.phase === ParticipationPhase.POST_WIN &&
@@ -120,8 +97,9 @@ export class CarContributionsService {
             contribution,
             participation: carParticipation,
             plan,
-            message: carAwardedNow
-                ? `Congratulations! You have reached PKR ${plan.directAwardThreshold.toLocaleString()} and been awarded a car! Your monthly payment is now PKR ${plan.postWinMonthly.toLocaleString()}.`
+            thresholdReached,
+            message: thresholdReached
+                ? `Congratulations! You have reached PKR ${plan.directAwardThreshold.toLocaleString()} - you can now request your car.`
                 : 'Payment successful'
         };
     }

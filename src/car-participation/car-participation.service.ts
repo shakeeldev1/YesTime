@@ -1,9 +1,12 @@
-import { BadRequestException, Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { CarParticipation, ParticipationPhase, ParticipationStatus } from './schemas/car-participation.schema';
 import { CarPlayEntry } from './schemas/car-play-entry.schema';
 import { CarContribution } from '../car-contributions/schemas/car-contribution.schema';
+import { CarWinner } from '../car-winner/schemas/car-winner.schema';
+import { CarRequest } from './schemas/car-request.schema';
 import { UsersService } from '../users/users.service';
+import { MailerService } from '../mailer/mailer.service';
 import { Model, Types } from 'mongoose';
 import { CAR_PLANS, DEFAULT_CAR_PLAN_ID, getCarPlan, isValidCarPlanId } from './car-plans';
 
@@ -18,7 +21,16 @@ export class CarParticipationService {
     @InjectModel(CarContribution.name)
     private readonly carContributionModel: Model<CarContribution>;
 
-    constructor(private readonly usersService: UsersService) {}
+    @InjectModel(CarWinner.name)
+    private readonly carWinnerModel: Model<CarWinner>;
+
+    @InjectModel(CarRequest.name)
+    private readonly carRequestModel: Model<CarRequest>;
+
+    constructor(
+        private readonly usersService: UsersService,
+        private readonly mailerService: MailerService,
+    ) {}
 
     private getUtcDateKey(date: Date): string {
         return date.toISOString().slice(0, 10);
@@ -116,6 +128,187 @@ export class CarParticipationService {
             planId: resolvedPlanId,
             plan,
         };
+    }
+
+    // Lets a user move to a different car plan mid-way through (e.g. Plan 1 -> Plan 3).
+    // Only allowed while still PRE_WIN - once a car has been won or the plan fully paid
+    // off, switching plans no longer means anything. totalPaid carries over unchanged, so
+    // progress toward the new plan's threshold/target is recalculated from the same total.
+    // Reaching/crossing the new plan's directAwardThreshold this way does NOT auto-award a
+    // car (see requestCar()) - the user must submit a car request and have it approved,
+    // same as reaching the threshold via a normal contribution.
+    async switchPlan(userId: string, newPlanId: number) {
+        if (!isValidCarPlanId(newPlanId)) {
+            throw new BadRequestException(`Invalid plan selected. Choose a plan id between 1 and ${CAR_PLANS.length}.`);
+        }
+
+        const participation = await this.carParticipationModel.findOne({ userId });
+        if (!participation) {
+            throw new BadRequestException('You have not joined the car ownership scheme yet.');
+        }
+
+        if (participation.phase !== ParticipationPhase.PRE_WIN) {
+            throw new BadRequestException('You can only switch plans before winning or completing your current plan.');
+        }
+
+        if (participation.planId === newPlanId) {
+            throw new BadRequestException(`You are already on ${getCarPlan(newPlanId).name}.`);
+        }
+
+        const previousPlan = getCarPlan(participation.planId);
+        const newPlan = getCarPlan(newPlanId);
+
+        participation.planId = newPlanId;
+        await participation.save();
+
+        const thresholdReached = participation.totalPaid >= newPlan.directAwardThreshold;
+
+        return {
+            message: thresholdReached
+                ? `Plan switched from ${previousPlan.name} to ${newPlan.name}. Your existing PKR ${participation.totalPaid.toLocaleString()} already meets ${newPlan.name}'s direct-award threshold (PKR ${newPlan.directAwardThreshold.toLocaleString()}) - you can now request your car.`
+                : `Plan switched from ${previousPlan.name} to ${newPlan.name}.`,
+            participation,
+            previousPlan,
+            plan: newPlan,
+            thresholdReached,
+        };
+    }
+
+    // ========== CAR REQUEST (claim) WORKFLOW ==========
+
+    // User-side: submit a request to claim the car once totalPaid meets the plan's
+    // directAwardThreshold. Does not award anything by itself - an admin must approve it.
+    async requestCar(userId: string) {
+        const participation = await this.carParticipationModel.findOne({ userId });
+        if (!participation) {
+            throw new BadRequestException('You have not joined the car ownership scheme yet.');
+        }
+
+        if (participation.carAwarded || participation.phase !== ParticipationPhase.PRE_WIN) {
+            throw new BadRequestException('You are not eligible to request a car right now.');
+        }
+
+        const plan = getCarPlan(participation.planId);
+        if (participation.totalPaid < plan.directAwardThreshold) {
+            throw new BadRequestException(
+                `You need to pay at least PKR ${plan.directAwardThreshold.toLocaleString()} to request your car. You have paid PKR ${participation.totalPaid.toLocaleString()} so far.`,
+            );
+        }
+
+        const existingPending = await this.carRequestModel.findOne({
+            carParticipationId: participation._id,
+            status: 'pending',
+        });
+        if (existingPending) {
+            throw new BadRequestException('You already have a pending car request.');
+        }
+
+        const request = new this.carRequestModel({
+            carParticipationId: participation._id,
+            userId: participation.userId,
+            coupenNumber: participation.coupenNumber,
+            planId: participation.planId,
+            totalPaidAtRequest: participation.totalPaid,
+            status: 'pending',
+        });
+        await request.save();
+
+        return { message: 'Car request submitted. An admin will review it shortly.', request };
+    }
+
+    // User-side: view the status of their own (latest) car request.
+    async getMyCarRequest(userId: string) {
+        const participation = await this.carParticipationModel.findOne({ userId });
+        if (!participation) {
+            return null;
+        }
+        return this.carRequestModel
+            .findOne({ carParticipationId: participation._id })
+            .sort({ createdAt: -1 });
+    }
+
+    // Admin: pending requests awaiting review.
+    async getPendingCarRequests() {
+        return this.carRequestModel
+            .find({ status: 'pending' })
+            .populate('userId', 'name email phone')
+            .sort({ createdAt: 1 });
+    }
+
+    // Admin: full request history.
+    async getAllCarRequests() {
+        return this.carRequestModel
+            .find()
+            .populate('userId', 'name email phone')
+            .sort({ createdAt: -1 });
+    }
+
+    // Admin: approve - this is the only place a car actually gets awarded via the
+    // threshold path now (mirrors the logic that used to run automatically on contribution).
+    async approveCarRequest(requestId: string, adminId: string) {
+        if (!Types.ObjectId.isValid(requestId)) {
+            throw new BadRequestException('Invalid requestId.');
+        }
+
+        const request = await this.carRequestModel.findById(requestId);
+        if (!request) throw new NotFoundException('Car request not found');
+        if (request.status !== 'pending') throw new BadRequestException('Only pending requests can be approved');
+
+        const participation = await this.carParticipationModel.findById(request.carParticipationId);
+        if (!participation) throw new NotFoundException('Car participation not found');
+
+        const plan = getCarPlan(participation.planId);
+
+        if (!participation.carAwarded) {
+            participation.carAwarded = true;
+            participation.carAwardedDate = new Date();
+            participation.phase = ParticipationPhase.POST_WIN;
+            await participation.save();
+
+            const winner = new this.carWinnerModel({
+                carParticipationId: participation._id,
+                userId: participation.userId,
+                winningCoupen: participation.coupenNumber,
+                winType: 'threshold',
+                winningDate: new Date(),
+            });
+            await winner.save();
+
+            const user = await this.usersService.findById(participation.userId.toString());
+            if (user) {
+                await this.mailerService.sendCarAwardEmail(user.email, user.name, 'direct');
+            }
+        }
+
+        request.status = 'approved';
+        request.reviewedBy = adminId;
+        request.reviewedAt = new Date();
+        await request.save();
+
+        return {
+            message: `Car request approved. Car awarded - monthly payment is now PKR ${plan.postWinMonthly.toLocaleString()}.`,
+            request,
+            participation,
+        };
+    }
+
+    // Admin: reject - the user stays PRE_WIN and can submit a new request later.
+    async rejectCarRequest(requestId: string, adminId: string, reason?: string) {
+        if (!Types.ObjectId.isValid(requestId)) {
+            throw new BadRequestException('Invalid requestId.');
+        }
+
+        const request = await this.carRequestModel.findById(requestId);
+        if (!request) throw new NotFoundException('Car request not found');
+        if (request.status !== 'pending') throw new BadRequestException('Only pending requests can be rejected');
+
+        request.status = 'rejected';
+        request.reviewedBy = adminId;
+        request.reviewedAt = new Date();
+        request.reviewNote = reason;
+        await request.save();
+
+        return { message: 'Car request rejected.', request };
     }
 
     async getParticipation(userId: string) {
