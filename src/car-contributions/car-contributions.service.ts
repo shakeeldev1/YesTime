@@ -22,6 +22,26 @@ export class CarContributionsService {
         private usersService: UsersService,
     ) { }
 
+    private getUtcDayRange(reference: Date): { start: Date; end: Date } {
+        const start = new Date(reference);
+        start.setUTCHours(0, 0, 0, 0);
+        const end = new Date(start);
+        end.setUTCHours(24, 0, 0, 0);
+        return { start, end };
+    }
+
+    // Sums everything this user has already contributed today (UTC day), so a plan's
+    // dailyMax is enforced as a true daily CAP across multiple payments - not just a
+    // per-transaction ceiling that can be stacked past the limit in one day.
+    private async getTodaysContributionTotal(userId: string, now: Date): Promise<number> {
+        const { start, end } = this.getUtcDayRange(now);
+        const result = await this.carContributionModel.aggregate([
+            { $match: { userId: new Types.ObjectId(userId), createdAt: { $gte: start, $lt: end } } },
+            { $group: { _id: null, total: { $sum: '$amount' } } },
+        ]);
+        return result[0]?.total || 0;
+    }
+
     async create(userId: string, carParticipationId: string, amount: number) {
         // Without this guard, an invalid ObjectId string reaches findById and throws an
         // uncaught Mongoose CastError, which this app has no global filter for - it would
@@ -47,6 +67,20 @@ export class CarContributionsService {
         if (carParticipation.phase === ParticipationPhase.PRE_WIN) {
             if (amount < plan.dailyMin || amount > plan.dailyMax) {
                 throw new BadRequestException(`Payment amount must be between PKR ${plan.dailyMin} and PKR ${plan.dailyMax} for daily contribution`);
+            }
+
+            // dailyMax is a CAP on the whole day's contributions, not just a per-transaction
+            // ceiling - without this, multiple payments in the same day (each individually
+            // within range) could stack past the plan's actual daily limit.
+            const now = new Date();
+            const todaysTotal = await this.getTodaysContributionTotal(userId, now);
+            if (todaysTotal + amount > plan.dailyMax) {
+                const remaining = Math.max(0, plan.dailyMax - todaysTotal);
+                throw new BadRequestException(
+                    remaining > 0
+                        ? `You can contribute at most PKR ${plan.dailyMax.toLocaleString()} per day on ${plan.name}. You've already contributed PKR ${todaysTotal.toLocaleString()} today, so you can add up to PKR ${remaining.toLocaleString()} more.`
+                        : `You've already reached today's PKR ${plan.dailyMax.toLocaleString()} contribution limit on ${plan.name}. Come back tomorrow.`,
+                );
             }
         } else if (carParticipation.phase === ParticipationPhase.POST_WIN) {
             if (amount !== plan.postWinMonthly) {
@@ -203,6 +237,10 @@ export class CarContributionsService {
             };
         });
 
+        const todaysContributedAmount = participation.phase === ParticipationPhase.PRE_WIN
+            ? await this.getTodaysContributionTotal(userId, new Date())
+            : 0;
+
         return {
             hasJoined: true,
             participation: {
@@ -220,6 +258,13 @@ export class CarContributionsService {
                 ? { min: plan.dailyMin, max: plan.dailyMax }
                 : { min: plan.postWinMonthly, max: plan.postWinMonthly },
             remainingAmount: Math.max(0, targetAmount - participation.totalPaid),
+            // How much of today's dailyMax cap this user has already used up (across all of
+            // today's chunked payments), and how much room is left to contribute today -
+            // only meaningful in the pre-win (daily contribution) phase.
+            todaysContributedAmount,
+            remainingTodayAmount: participation.phase === ParticipationPhase.PRE_WIN
+                ? Math.max(0, plan.dailyMax - todaysContributedAmount)
+                : null,
             referralCode: referralCode || null,
             totalReferralEarnings: user?.totalReferralEarnings || 0,
             referralCount,
