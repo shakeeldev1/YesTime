@@ -100,7 +100,12 @@ export class CarParticipationService {
             throw new BadRequestException(`Invalid plan selected. Choose a plan id between 1 and ${CAR_PLANS.length}.`);
         }
 
-        let referrerId: string | undefined = referredByUserId;
+        // Both paths must be validated identically - referredByUserId is a raw user id taken
+        // directly from the request body, so without these same checks a caller could pass
+        // their OWN userId to self-refer and farm the 20% referral bonus on their own
+        // contributions forever, or pass a nonexistent id and have referral bonuses silently
+        // vanish into an orphaned wallet for a "referrer" that doesn't exist.
+        let referrerId: string | undefined;
         if (referralCode) {
             const referrer = await this.usersService.findByReferralCode(referralCode.trim().toUpperCase());
             if (!referrer) {
@@ -108,6 +113,15 @@ export class CarParticipationService {
             }
             if (referrer._id.toString() === userId) {
                 throw new BadRequestException('You cannot refer yourself.');
+            }
+            referrerId = referrer._id.toString();
+        } else if (referredByUserId) {
+            if (referredByUserId === userId) {
+                throw new BadRequestException('You cannot refer yourself.');
+            }
+            const referrer = await this.usersService.findById(referredByUserId);
+            if (!referrer) {
+                throw new BadRequestException('Invalid referrer.');
             }
             referrerId = referrer._id.toString();
         }
@@ -119,6 +133,18 @@ export class CarParticipationService {
         }
         const newParticipation = new this.carParticipationModel(participationData);
         await newParticipation.save();
+
+        if (referrerId) {
+            // Keep the general User.referredBy link in sync with this car-specific one, so
+            // admin views that count referrals at the User level (UsersService.countReferrals,
+            // used by the Users page and shopkeeper listings) actually reflect this referral -
+            // without this, referredBy is never set anywhere on User, so those referral counts
+            // always read 0 even for users who earned real referral bonuses via this module.
+            const joiningUser = await this.usersService.findById(userId);
+            if (joiningUser && !joiningUser.referredBy) {
+                await this.usersService.updateProfile(userId, { referredBy: new Types.ObjectId(referrerId) } as any);
+            }
+        }
 
         const plan = getCarPlan(resolvedPlanId);
         return {
