@@ -86,6 +86,20 @@ export class GameService {
     return Math.max(0, invested - playsUsed);
   }
 
+  private getPurchasedPlayCount(token: GameCycle): number {
+    return Math.floor(this.getTokenInvestedValue(token) / this.INVESTMENT_AMOUNT);
+  }
+
+  private getRemainingPlayCount(token: GameCycle): number {
+    const purchased = this.getPurchasedPlayCount(token);
+    const used = Number((token as any).playsUsedThisCycle || 0);
+    const queuedReservation = this.isQueued(token) ? 1 : 0;
+
+    // A queued play is unavailable, but it should still leave the dashboard showing
+    // the user's unused plays instead of briefly collapsing to zero.
+    return Math.max(0, purchased - used - queuedReservation);
+  }
+
   private hasUnplayedInvestment(token: GameCycle): boolean {
     return this.getUnplayedInvestmentCount(token) > 0;
   }
@@ -122,6 +136,8 @@ export class GameService {
     const queued = this.isQueued(token);
     const permanent = this.isPermanentToken(token);
     const unplayedInvestmentCount = this.getUnplayedInvestmentCount(token);
+    const purchasedPlayCount = this.getPurchasedPlayCount(token);
+    const remainingPlayCount = this.getRemainingPlayCount(token);
 
     return {
       id: token._id,
@@ -140,9 +156,9 @@ export class GameService {
       permanentPrizeAmount: Number((token as any).permanentPrizeAmount || (permanent ? this.MAX_REWARD : 0)),
       autoJoinEnabledForCurrentCycle: Boolean((token as any).autoJoinEnabledForCurrentCycle),
       hasPlayedCurrentCycle: unplayedInvestmentCount === 0 && !permanent,
-      playsPurchased: unplayedInvestmentCount,
-      playsUsed: Math.max(0, Math.floor(this.getTokenInvestedValue(token) / this.INVESTMENT_AMOUNT) - unplayedInvestmentCount),
-      playsRemaining: eligibleToday ? unplayedInvestmentCount : 0,
+      playsPurchased: purchasedPlayCount,
+      playsUsed: Math.max(0, purchasedPlayCount - remainingPlayCount),
+      playsRemaining: remainingPlayCount,
       queuedForNextRound: queued,
       participationMode: (token as any).participationMode || 'none',
       currentDay,
