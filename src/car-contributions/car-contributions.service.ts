@@ -212,7 +212,13 @@ export class CarContributionsService {
         // Get referral info (backfill a referral code for accounts created before signup assigned one)
         const user = await this.userModel.findById(userId);
         const referralCode = user?.referralCode || (user ? await this.usersService.ensureReferralCode(userId) : null);
-        const referralCount = await this.carParticipationModel.countDocuments({ referredBy: userId });
+        const referralCount = await this.carParticipationModel.countDocuments({ referredBy: new Types.ObjectId(userId) });
+        const referralBonusFromMyContributions = participation.referredBy
+            ? contributions.reduce((total, payment) => total + Math.round(Number(payment.amount || 0) * REFERRAL_PERCENTAGE), 0)
+            : 0;
+        const referrer = participation.referredBy
+            ? await this.userModel.findById(participation.referredBy).select('name email referralCode').lean()
+            : null;
         const referredParticipations = await this.carParticipationModel
             .find({ referredBy: new Types.ObjectId(userId) })
             .select('userId coupenNumber totalPaid phase status')
@@ -266,6 +272,15 @@ export class CarContributionsService {
                 ? Math.max(0, plan.dailyMax - todaysContributedAmount)
                 : null,
             referralCode: referralCode || null,
+            referrer: referrer
+                ? {
+                    userId: referrer._id,
+                    name: referrer.name,
+                    email: referrer.email,
+                    referralCode: referrer.referralCode || null,
+                }
+                : null,
+            referralBonusFromMyContributions,
             totalReferralEarnings: user?.totalReferralEarnings || 0,
             referralCount,
             referralMembers,

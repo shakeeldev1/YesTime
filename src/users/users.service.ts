@@ -1,7 +1,7 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { User } from './schemas/user.schema';
-import { Model } from 'mongoose';
+import { Model, Types } from 'mongoose';
 
 @Injectable()
 export class UsersService {
@@ -130,7 +130,7 @@ export class UsersService {
     }
 
     async countReferrals(userId: string): Promise<number> {
-        return this.userModel.countDocuments({ referredBy: userId });
+        return this.userModel.countDocuments({ referredBy: new Types.ObjectId(userId) });
     }
 
     async deleteUser(userId: string): Promise<boolean> {

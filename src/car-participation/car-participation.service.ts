@@ -135,15 +135,10 @@ export class CarParticipationService {
         await newParticipation.save();
 
         if (referrerId) {
-            // Keep the general User.referredBy link in sync with this car-specific one, so
-            // admin views that count referrals at the User level (UsersService.countReferrals,
-            // used by the Users page and shopkeeper listings) actually reflect this referral -
-            // without this, referredBy is never set anywhere on User, so those referral counts
-            // always read 0 even for users who earned real referral bonuses via this module.
-            const joiningUser = await this.usersService.findById(userId);
-            if (joiningUser && !joiningUser.referredBy) {
-                await this.usersService.updateProfile(userId, { referredBy: new Types.ObjectId(referrerId) } as any);
-            }
+            // Keep the general User.referredBy link in sync with this car-specific one so
+            // referral counts and the referrer card can be resolved reliably from the user
+            // document as well as from the car participation record.
+            await this.usersService.updateProfile(userId, { referredBy: new Types.ObjectId(referrerId) } as any);
         }
 
         const plan = getCarPlan(resolvedPlanId);
