@@ -5,6 +5,7 @@ import * as nodemailer from 'nodemailer';
 export class MailerService {
   private readonly logger = new Logger(MailerService.name);
   private transporter: nodemailer.Transporter;
+  private readonly senderName = 'Yes Time';
 
   constructor() {
     this.transporter = nodemailer.createTransport({
@@ -19,16 +20,51 @@ export class MailerService {
   }
 
   private get fromAddress(): string {
-    return process.env.SMTP_FROM || process.env.SMTP_USER || 'noreply@yestime.com';
+    const smtpUser = process.env.SMTP_USER?.trim();
+    const configuredFrom = process.env.SMTP_FROM?.trim();
+
+    if (!configuredFrom) {
+      return smtpUser || 'noreply@yestime.com';
+    }
+
+    if (!smtpUser) {
+      return configuredFrom;
+    }
+
+    const smtpHost = (process.env.SMTP_HOST || '').toLowerCase();
+    const usingGmailRelay = smtpHost.includes('gmail.com') || smtpHost.includes('googlemail.com');
+
+    if (usingGmailRelay) {
+      return smtpUser;
+    }
+
+    return configuredFrom;
+  }
+
+  private buildMailOptions(to: string, subject: string, html: string, text: string): nodemailer.SendMailOptions {
+    return {
+      from: `"${this.senderName}" <${this.fromAddress}>`,
+      to,
+      replyTo: this.fromAddress,
+      subject,
+      text,
+      html,
+      headers: {
+        'X-Mailer': this.senderName,
+      },
+    };
+  }
+
+  private async sendMail(options: nodemailer.SendMailOptions): Promise<void> {
+    await this.transporter.sendMail(options);
   }
 
   async sendOtpEmail(to: string, otp: string, name: string): Promise<void> {
     try {
-      await this.transporter.sendMail({
-        from: `"Yes Time" <${this.fromAddress}>`,
+      await this.sendMail(this.buildMailOptions(
         to,
-        subject: 'Your OTP Verification Code - Yes Time',
-        html: `
+        'Your OTP Verification Code - Yes Time',
+        `
           <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
             <div style="background: linear-gradient(135deg, #003366, #1A539B); padding: 30px; border-radius: 10px 10px 0 0; text-align: center;">
               <h1 style="color: white; margin: 0; font-size: 24px;">Yes Time</h1>
@@ -46,7 +82,8 @@ export class MailerService {
             </div>
           </div>
         `,
-      });
+        `Yes Time\n\nHello ${name},\n\nYour OTP verification code is: ${otp}\n\nThis code is valid for 10 minutes. Do not share it with anyone.\n\nIf you didn't request this code, please ignore this email.`
+      ));
       this.logger.log(`OTP email sent to ${to}`);
     } catch (error) {
       this.logger.error(`Failed to send OTP email to ${to}: ${error.message}`);
@@ -56,11 +93,10 @@ export class MailerService {
 
   async sendPasswordResetEmail(to: string, otp: string, name: string): Promise<void> {
     try {
-      await this.transporter.sendMail({
-        from: `"Yes Time" <${this.fromAddress}>`,
+      await this.sendMail(this.buildMailOptions(
         to,
-        subject: 'Password Reset Code - Yes Time',
-        html: `
+        'Password Reset Code - Yes Time',
+        `
           <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
             <div style="background: linear-gradient(135deg, #003366, #1A539B); padding: 30px; border-radius: 10px 10px 0 0; text-align: center;">
               <h1 style="color: white; margin: 0; font-size: 24px;">Yes Time</h1>
@@ -76,7 +112,8 @@ export class MailerService {
             </div>
           </div>
         `,
-      });
+        `Yes Time\n\nHello ${name},\n\nUse this code to reset your password: ${otp}\n\nThis code is valid for 10 minutes. If you did not request a reset, you can ignore this email.`
+      ));
       this.logger.log(`Password reset email sent to ${to}`);
     } catch (error) {
       this.logger.error(`Failed to send password reset email to ${to}: ${error.message}`);
@@ -86,11 +123,10 @@ export class MailerService {
 
   async sendShopkeeperApprovalEmail(to: string, name: string, shopName: string): Promise<void> {
     try {
-      await this.transporter.sendMail({
-        from: `"Yes Time" <${this.fromAddress}>`,
+      await this.sendMail(this.buildMailOptions(
         to,
-        subject: 'Shopkeeper Request Approved! - Yes Time',
-        html: `
+        'Shopkeeper Request Approved! - Yes Time',
+        `
           <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
             <div style="background: linear-gradient(135deg, #003366, #1A539B); padding: 30px; border-radius: 10px 10px 0 0; text-align: center;">
               <h1 style="color: white; margin: 0;">🎉 Congratulations!</h1>
@@ -108,7 +144,8 @@ export class MailerService {
             </div>
           </div>
         `,
-      });
+        `Yes Time\n\nHello ${name},\n\nYour shopkeeper request for "${shopName}" has been approved.\n\nPKR 1,500 registration fee has been deducted from your wallet. You can now start managing your shop.\n\nOpen your shopkeeper dashboard: ${process.env.FRONTEND_URL || 'http://localhost:5173'}/shopkeeper-dashboard`
+      ));
     } catch (error) {
       this.logger.error(`Failed to send approval email to ${to}: ${error.message}`);
     }
@@ -116,11 +153,10 @@ export class MailerService {
 
   async sendShopkeeperRejectionEmail(to: string, name: string, shopName: string, reason?: string): Promise<void> {
     try {
-      await this.transporter.sendMail({
-        from: `"Yes Time" <${this.fromAddress}>`,
+      await this.sendMail(this.buildMailOptions(
         to,
-        subject: 'Shopkeeper Request Update - Yes Time',
-        html: `
+        'Shopkeeper Request Update - Yes Time',
+        `
           <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
             <div style="background: linear-gradient(135deg, #003366, #1A539B); padding: 30px; border-radius: 10px 10px 0 0; text-align: center;">
               <h1 style="color: white; margin: 0;">Request Update</h1>
@@ -133,7 +169,8 @@ export class MailerService {
             </div>
           </div>
         `,
-      });
+        `Yes Time\n\nHello ${name},\n\nYour shopkeeper request for "${shopName}" has been rejected.${reason ? `\n\nReason: ${reason}` : ''}\n\nYou can re-apply with updated information. If you have questions, please contact our support team.`
+      ));
     } catch (error) {
       this.logger.error(`Failed to send rejection email to ${to}: ${error.message}`);
     }
@@ -141,11 +178,10 @@ export class MailerService {
 
   async sendAdminNewShopkeeperRequest(adminEmail: string, shopName: string, ownerName: string): Promise<void> {
     try {
-      await this.transporter.sendMail({
-        from: `"Yes Time" <${this.fromAddress}>`,
-        to: adminEmail,
-        subject: 'New Shopkeeper Request Pending - Yes Time',
-        html: `
+      await this.sendMail(this.buildMailOptions(
+        adminEmail,
+        'New Shopkeeper Request Pending - Yes Time',
+        `
           <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
             <div style="background: linear-gradient(135deg, #003366, #1A539B); padding: 30px; border-radius: 10px 10px 0 0; text-align: center;">
               <h1 style="color: white; margin: 0;">New Shopkeeper Request</h1>
@@ -165,7 +201,8 @@ export class MailerService {
             </div>
           </div>
         `,
-      });
+        `Yes Time\n\nA new shopkeeper request has been submitted.\n\nShop Name: ${shopName}\nOwner: ${ownerName}\n\nReview request: ${process.env.FRONTEND_URL || 'http://localhost:5173'}/admin/shopkeeper`
+      ));
     } catch (error) {
       this.logger.error(`Failed to send admin notification: ${error.message}`);
     }
@@ -173,11 +210,10 @@ export class MailerService {
 
   async sendRegistrationCouponEmail(to: string, name: string, couponNumber: string): Promise<void> {
     try {
-      await this.transporter.sendMail({
-        from: `"Yes Time" <${this.fromAddress}>`,
+      await this.sendMail(this.buildMailOptions(
         to,
-        subject: 'Registration Successful - Your Lucky Coupon! - Yes Time',
-        html: `
+        'Registration Successful - Your Lucky Coupon! - Yes Time',
+        `
           <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
             <div style="background: linear-gradient(135deg, #003366, #1A539B); padding: 30px; border-radius: 10px 10px 0 0; text-align: center;">
               <h1 style="color: white; margin: 0;">🎉 Registration Complete!</h1>
@@ -193,7 +229,8 @@ export class MailerService {
             </div>
           </div>
         `,
-      });
+        `Yes Time\n\nHello ${name},\n\nThank you for paying the registration fee of PKR 1,500. Your permanent lucky coupon is: ${couponNumber}\n\nThis coupon is permanent and will participate in every lucky draw. Each win awards you PKR 1,000!\n\nGood luck!`
+      ));
     } catch (error) {
       this.logger.error(`Failed to send registration coupon email to ${to}: ${error.message}`);
     }
@@ -201,11 +238,10 @@ export class MailerService {
 
   async sendLotteryWinEmail(to: string, name: string, couponNumber: string, prizeAmount: number, moduleName: string): Promise<void> {
     try {
-      await this.transporter.sendMail({
-        from: `"Yes Time" <${this.fromAddress}>`,
+      await this.sendMail(this.buildMailOptions(
         to,
-        subject: `🎉 You Won PKR ${prizeAmount} in ${moduleName}! - Yes Time`,
-        html: `
+        `🎉 You Won PKR ${prizeAmount} in ${moduleName}! - Yes Time`,
+        `
           <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
             <div style="background: linear-gradient(135deg, #FFD700, #FFA500); padding: 30px; border-radius: 10px 10px 0 0; text-align: center;">
               <h1 style="color: white; margin: 0; text-shadow: 1px 1px 2px rgba(0,0,0,0.3);">🏆 CONGRATULATIONS! 🏆</h1>
@@ -221,7 +257,8 @@ export class MailerService {
             </div>
           </div>
         `,
-      });
+        `Yes Time\n\nHello ${name},\n\nYour coupon ${couponNumber} won in the ${moduleName} lucky draw.\n\nPrize Amount: PKR ${prizeAmount.toLocaleString()}\n\nThe prize amount has been credited to your wallet.`
+      ));
     } catch (error) {
       this.logger.error(`Failed to send lottery win email to ${to}: ${error.message}`);
     }
@@ -229,11 +266,10 @@ export class MailerService {
 
   async sendCarAwardEmail(to: string, name: string, winType: 'lottery' | 'direct'): Promise<void> {
     try {
-      await this.transporter.sendMail({
-        from: `"Yes Time" <${this.fromAddress}>`,
+      await this.sendMail(this.buildMailOptions(
         to,
-        subject: '🚗 Car Awarded! - Yes Time',
-        html: `
+        '🚗 Car Awarded! - Yes Time',
+        `
           <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
             <div style="background: linear-gradient(135deg, #003366, #1A539B); padding: 30px; border-radius: 10px 10px 0 0; text-align: center;">
               <h1 style="color: white; margin: 0;">🚗 Car Awarded!</h1>
@@ -246,7 +282,8 @@ export class MailerService {
             </div>
           </div>
         `,
-      });
+        `Yes Time\n\nHello ${name},\n\nCongratulations! You have been awarded a car ${winType === 'lottery' ? 'through the lucky draw' : 'by reaching the threshold amount of PKR 4,65,500'}.\n\nYour monthly payment will now be PKR 36,000 until the total car price of PKR 30,00,000 is fully paid.\n\nPlease contact our office for car delivery details.`
+      ));
     } catch (error) {
       this.logger.error(`Failed to send car award email to ${to}: ${error.message}`);
     }
@@ -254,11 +291,10 @@ export class MailerService {
 
   async sendReferralBonusEmail(to: string, name: string, amount: number, referredUserName: string): Promise<void> {
     try {
-      await this.transporter.sendMail({
-        from: `"Yes Time" <${this.fromAddress}>`,
+      await this.sendMail(this.buildMailOptions(
         to,
-        subject: `Referral Bonus Earned - PKR ${amount}! - Yes Time`,
-        html: `
+        `Referral Bonus Earned - PKR ${amount}! - Yes Time`,
+        `
           <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
             <div style="background: linear-gradient(135deg, #003366, #1A539B); padding: 30px; border-radius: 10px 10px 0 0; text-align: center;">
               <h1 style="color: white; margin: 0;">Referral Bonus!</h1>
@@ -270,7 +306,8 @@ export class MailerService {
             </div>
           </div>
         `,
-      });
+        `Yes Time\n\nHello ${name},\n\nYour referral ${referredUserName} made a payment and you earned a bonus of PKR ${amount}.\n\nThe amount has been credited to your wallet. Keep referring to earn more!`
+      ));
     } catch (error) {
       this.logger.error(`Failed to send referral bonus email to ${to}: ${error.message}`);
     }
@@ -278,12 +315,7 @@ export class MailerService {
 
   async sendGenericEmail(to: string, subject: string, html: string): Promise<void> {
     try {
-      await this.transporter.sendMail({
-        from: `"Yes Time" <${this.fromAddress}>`,
-        to,
-        subject,
-        html,
-      });
+      await this.sendMail(this.buildMailOptions(to, subject, html, 'Yes Time'));
     } catch (error) {
       this.logger.error(`Failed to send email to ${to}: ${error.message}`);
     }

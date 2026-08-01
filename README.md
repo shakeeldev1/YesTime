@@ -59,6 +59,12 @@ $ npm run test:cov
 
 ## Deployment
 
+## Email Deliverability
+
+If your emails are landing in spam, code alone will not solve it. Use a real SMTP provider or verified domain mailbox and make sure the sending domain passes SPF, DKIM, and DMARC.
+
+Keep `SMTP_FROM` aligned with the authenticated mailbox/domain. If you are using Gmail SMTP, set `SMTP_FROM` to the same Gmail address as `SMTP_USER`. For a custom domain, verify the domain with your email provider before using it as the sender.
+
 When you're ready to deploy your NestJS application to production, there are some key steps you can take to ensure it runs as efficiently as possible. Check out the [deployment documentation](https://docs.nestjs.com/deployment) for more information.
 
 If you are looking for a cloud-based platform to deploy your NestJS application, check out [Mau](https://mau.nestjs.com), our official platform for deploying NestJS applications on AWS. Mau makes deployment straightforward and fast, requiring just a few simple steps:
